@@ -1,0 +1,45 @@
+#include <microSD.h>
+
+static String getNewFilename() {
+    char filename[13];
+    for (uint16_t i = 0; i < 9999; i++) {
+        sprintf(filename, "DATA%04d.CSV", i);
+        if (!SD.exists(filename)) {
+            return String(filename);
+        }
+    }
+    return "DATA.CSV";   // fallback
+}
+
+bool logIMUData(String filename, float *ax, float *ay, float *az, float *gx, float *gy, float *gz, uint16_t length) {
+    File file = SD.open(filename, FILE_WRITE);
+    if (!file) {
+        Serial.println("Failed to open file.");
+        return false;
+    }
+
+    for (uint16_t i = 0; i < length; i++) {
+        file.write((uint8_t*)&gx[i], 4);
+        file.write((uint8_t*)&gy[i], 4);
+        file.write((uint8_t*)&gz[i], 4);
+        file.write((uint8_t*)&ax[i], 4);
+        file.write((uint8_t*)&ay[i], 4);
+        file.write((uint8_t*)&az[i], 4);
+    }
+
+    file.close();
+    return true;
+}
+
+void printLog(String filename) {
+    File file = SD.open(filename, FILE_READ);
+    if (!file) {
+        Serial.println("Could not read file.");
+        return;
+    }
+    float read;
+    while (file.available() >= sizeof(float)) {
+        file.read((uint8_t*)&read, sizeof(float));
+        Serial.println(read);
+    }
+}
