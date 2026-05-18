@@ -187,8 +187,8 @@ for i = 1:points
     % Convert the text back into a number
     cpp_results(i) = str2double(raw_line);
 end
-numSpikes = str2num(readline(mcu));
-numUnresponsive = str2num(readline(mcu));
+%numSpikes = str2num(readline(mcu));
+%numUnresponsive = str2num(readline(mcu));
 
 for i = 1:length(t2)
     % Read one line from the serial port (blocks until data arrives)
@@ -207,10 +207,10 @@ numUnresponsive2 = str2num(readline(mcu));
 mcu_mu = str2double(readline(mcu));
 mcu_sd = str2double(readline(mcu));
 mcu_points = str2num(readline(mcu));
-disp("Spikes:");
-disp(numSpikes);
-disp("Unresponsive:");
-disp(numUnresponsive);
+%disp("Spikes:");
+%disp(numSpikes);
+%disp("Unresponsive:");
+%disp(numUnresponsive);
 disp("MCU MU:");
 disp(mcu_mu);
 disp("MCU SSD:");
@@ -231,16 +231,16 @@ decimated1 = filter_and_decimate(demeaned, 416, 8, 1);
 detrended = remove_trend(decimated1);
 detrended = remove_spikes(detrended, 6, 5);
 decimated2 = filter_and_decimate(detrended, 8, 2, 0.5);
-plot(t', cpp_results);
+%plot(t', cpp_results);
 hold on;
-plot(t', test_data);
-plot(t', demeaned);
+%plot(t', test_data);
+%plot(t', demeaned);
 plot(t2', cpp_results2);
-plot(t2', decimated1);
-plot(t2', detrended);
+%plot(t2', decimated1);
+%plot(t2', detrended);
 plot(t3', cpp_results3);
 plot(t3', decimated2);
-legend("MCU Cleaned", "Actual data", "Matlab Cleaned", "MCU dec1", "Matlab dec1", "Matlab Detrended", "MCU dec2", "Matlab dec2");
+%legend("MCU Cleaned", "Actual data", "Matlab Cleaned", "MCU dec1", "Matlab dec1", "Matlab Detrended", "MCU dec2", "Matlab dec2");
 title('Output from ItsyBitsy M4 (ARM Cortex-M4)');
 %}
 
@@ -348,6 +348,66 @@ plot(t2(1:2560), cpp_results2);
 %plot(f_axis, avg_psd);
 %legend("MATLAB avgPSD", "MCU avgPSD");
 
+%% Integration Test MCU (something went wrong...)
+
+baud_rate = 115200;
+port_name = 'COM5'; 
+
+% Clear any old connections to prevent port lockouts
+if exist('mcu', 'var')
+    clear mcu;
+end
+
+% Open the port
+mcu = serialport(port_name, baud_rate);
+
+configureTerminator(mcu, "LF");
+
+% 2. Prepare the data array
+% This should match the TEST_DATA_LEN from your C++ code 
+cpp_results = zeros(513, 1);
+
+pause(2);
+disp('Waiting for data from microcontroller...');
+write(mcu, "G", "uint8");
+
+for i = 1:513
+    cpp_results(i) = str2double(readline(mcu));
+end
+mm2 = str2double(readline(mcu));
+mm1 = str2double(readline(mcu));
+m0 = str2double(readline(mcu));
+m1 = str2double(readline(mcu));
+m2 = str2double(readline(mcu));
+m3 = str2double(readline(mcu));
+SWH = str2double(readline(mcu));
+
+clear mcu;
+
+fprintf("Spectral Moment -2: %d\n", mm2);
+fprintf("Spectral Moment -1: %d\n", mm1);
+fprintf("Spectral Moment 0: %d\n", m0);
+fprintf("Spectral Moment 1: %d\n", m1);
+fprintf("Spectral Moment 2: %d\n", m2);
+fprintf("Spectral Moment 3: %d\n", m3);
+fprintf("Significant Wave height: %d\n", SWH);
+
+f_axis = 0:1/512:1;
+plot(f_axis, cpp_results);
+
+%% Plot/show results of Bicycle Test
+load("BicycleData.mat");
+
+mm2 = 25.177137;
+mm1 = 0.461257;
+m0 = 0.010254;
+m1 = 0.000252;
+m2 = 0.000007;
+m3 = 0.000000;
+SWH = 0.405041;
+
+f_axis = 0:1/512:1;
+plot(f_axis, BicycleData);
 
 %% Function Definitions
 function [total_unresponsive, max_consecutive, frac] = num_cons_unresponsive(data)

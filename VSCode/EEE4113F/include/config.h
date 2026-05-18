@@ -5,6 +5,8 @@
 #include <SD.h>
 #include <arm_math.h>
 
+#define GET_MAX(a, b) ((a) > (b) ? (a) : (b))
+
 #define IMU_CS_PIN 2
 #define SD_CS_PIN 11
 #define IMU_INT1_PIN   7
@@ -17,24 +19,28 @@
 #define FULLSCALE_MODE 1        // 0, 1, 2, 3:  Max deg/s. 245, 500, 1000, 2000
                                 //              Max G-force. 2, 4, 8, 16
 #define UNLOADS_PER_DEC 4
+#define BUFFER_BASE    ((UNLOADS_PER_DEC + 1) * FIFO_THRESHOLD / AXES)  // Number of samples per axis in DMA buffer. Must be >= FIFO_THRESHOLD/AXES * UNLOADS_PER_DEC
 #define STD_DEVS        6
 #define DESPIKE_ITER    5
 
 #define DEC1            52
 #define DEC2            4
-#define FINAL_HZ        2 // Directly affected by DEC1 and DEC2 and SAMPLE_RATE_HZ. Change with them
+#define FINAL_HZ        (SAMPLE_RATE_HZ / (DEC1 * DEC2)) // Directly affected by DEC1 and DEC2 and SAMPLE_RATE_HZ. Change with them
 #define DETREND_K       0.9995
 #define STATS_ALPHA     0.05
 #define STATS_BATCH_THRESH 5
 
-#define INT_F1          0.02  //Kohout value
-#define INT_F2          0.03
-#define FINAL_SAMPLES   3000
-#define PADDED_FOURIER_LEN  4096
+#define INT_F1          0.02  // Kohout value = 0.02
+#define INT_F2          0.03  // Kohout value = 0.03
+#define FINAL_SAMPLES   200  // 3060 = M*(K+1) + 2 * DISCARD_SIZE
+#define BUFFER_SIZE    (GET_MAX(BUFFER_BASE, FINAL_SAMPLES))
+#define PADDED_FOURIER_LEN  4096 // Rounded FINAL_SAMPLES up to next power of 2 for FFT
 #define M               512
-#define K               4
-#define TAPER_GAMMA     5
-#define DISCARD_SIZE    220
+#define K               4     // Number of segments for Welch's method. Affects variance of PSD estimate and max resolvable frequency (lower K = better low-freq resolution)
+#define TAPER_GAMMA     5     // Kohout value = 5 (%)
+#define DISCARD_SIZE    250   // Transients out to 120s 
+#define UNRESPONSE_TOLERANCE 0.15f // 0.15 (15%) = Kohout value
+
 
 #define G               -9.80665f
 
@@ -44,12 +50,15 @@ static float RAO[] = {
 
 enum SystemState {
   IDLE,
+  CONFIG,
   READING_IMU,
   FILTERING,
   PROCESSING,
-  COMMUNICATING,
+  TRANSMITTING,
+  BEACON,
+  DUMPING,
   ERROR
 };
 
-static SystemState currentState = IDLE;
-static SystemState prevState = IDLE;
+static SystemState currentState;
+static SystemState prevState;

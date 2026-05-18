@@ -2,11 +2,6 @@
 
 void fiifif(arm_rfft_fast_instance_f32 &S, float *data, float *out) {
     static float padded_data[PADDED_FOURIER_LEN];
-    // Add a simple Hann window to the input data
-    for (uint16_t i = 0; i < (float)FINAL_SAMPLES*0.05f; i++) {
-        float window = 0.5f * (1.0f - cosf(PI * i / ((float)FINAL_SAMPLES * 0.05f)));
-        padded_data[i] = data[i] * window;
-    }
     memset(padded_data, 0, PADDED_FOURIER_LEN * sizeof(float));
     memcpy(padded_data, data, FINAL_SAMPLES * sizeof(float));
     static float complex_fourier[PADDED_FOURIER_LEN];
@@ -38,14 +33,14 @@ void fiifif(arm_rfft_fast_instance_f32 &S, float *data, float *out) {
 
 void getAvgPSD(arm_rfft_fast_instance_f32 &S1, arm_rfft_fast_instance_f32 &S2, float *data, float *avgPSD) {
     // Serial.println("Pos data:");
-    for (uint16_t i = 0; i < FINAL_SAMPLES; i++) {
-        Serial.println(data[i], 6);
-    }
+    // for (uint16_t i = 0; i < FINAL_SAMPLES; i++) {
+    //     Serial.println(data[i], 6);
+    // }
     static float pos_data[M*(K+1)];
     fiifif(S1, data, pos_data);
-    for (uint16_t i = 0; i < M*(K+1); i++) {
-        Serial.println(pos_data[i], 6);
-    }
+    // for (uint16_t i = 0; i < M*(K+1); i++) {
+    //     Serial.println(pos_data[i], 6);
+    // }
     static float taper[2*M];
     uint16_t taper_width = floor(2 * M * TAPER_GAMMA / 100);
     float taper_power = 0;
@@ -121,12 +116,13 @@ float significantWH(float m0) {
     return 4 * sqrtf(m0);
 }
 
-void fullPipeline(arm_rfft_fast_instance_f32 &S1, arm_rfft_fast_instance_f32 &S2, /*float *gx, float *gy, float *gz, float *ax, float *ay,*/ float *az, float * avgPSD, float &mm2, float &mm1, float &m0, float &m1, float &m2, float &m3, float &SWH) {
-    //getVert(gx, gy, gz, ax, ay, az);
+void fullPipeline(arm_rfft_fast_instance_f32 &S1, arm_rfft_fast_instance_f32 &S2, float *gx, float *gy, float *gz, float *ax, float *ay, float *az, float * avgPSD, float &mm2, float &mm1, float &m0, float &m1, float &m2, float &m3, float &SWH) {
+    getVert(gx, gy, gz, ax, ay, az);
+    Serial.println("GotVert");
     getAvgPSD(S1, S2, az, avgPSD);
     for (uint16_t i = 0; i < M+1; i++) {
         Serial.println(avgPSD[i], 6);
-    }
+    }//COMMENT 
     getMoments(avgPSD, mm2, mm1, m0, m1, m2, m3);
     SWH = significantWH(m0);
 }

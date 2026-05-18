@@ -32,7 +32,7 @@ void initIMU(LSM6DS3 &myIMU) {
     //  4 (Bypass until trigger)
     //  6 (Continous mode)
     if (myIMU.begin() != IMU_SUCCESS) {
-        Serial.println("IMU init failed");
+        //UNCOMMENT Serial.println("IMU init failed");
         while (1);  // TODO: Change error handling for final version
     }
 
@@ -43,7 +43,7 @@ void initIMU(LSM6DS3 &myIMU) {
     myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL6_G, 0b00000000);
     //myIMU.writeRegister(LSM6DS3_ACC_GYRO_FIFO_CTRL5, 0b00101110);
 
-    Serial.println("IMU initialised");
+    //UNCOMMENT Serial.println("IMU initialised");
     return;
 }
 
@@ -74,21 +74,7 @@ bool readFifo(LSM6DS3 &myIMU, uint16_t &data_index, float* ax, float* ay, float*
 {
     uint16_t fifoStatus  = myIMU.fifoGetStatus();
     uint16_t fifoCount   = fifoStatus & 0x0FFF;
-    uint16_t pattern = fifoPattern(myIMU);
-    // uint16_t remainder = fifoCount % AXES;
-    // Serial.println(remainder);
-    // uint16_t maxSamples = FIFO_THRESHOLD;
-    // if (fifoCount > maxSamples) {
-    //     Serial.println("Delay Between Threshold and Read");
-    //     if (fifoCount > 4096) {
-    //         Serial.println("More Samples Than FIFO Space. Exiting read...");
-    //         return false;
-    //     }
-    // }
-    //     uint16_t remainder = fifoCount % AXES;
-    // for (uint16_t i = 0; i < remainder; i++) {
-    //     myIMU.fifoRead();
-    // }
+    // uint16_t pattern = fifoPattern(myIMU);
     uint16_t sample_sets = fifoCount / AXES;
     if (sample_sets > 1) {
         sample_sets -= 2; // Leave the last set for the next read
@@ -104,7 +90,7 @@ bool readFifo(LSM6DS3 &myIMU, uint16_t &data_index, float* ax, float* ay, float*
         az[i] = myIMU.calcAccel(myIMU.fifoRead());
         uint16_t rem = (myIMU.fifoGetStatus() & 0x0FFF) % AXES;
         if (rem != 0) {
-            Serial.println("Found non-zero remainder....");
+            //UNCOMMENT Serial.println("Found non-zero remainder....");
             for (uint8_t i = 0; i < rem; i++) {
                 myIMU.fifoRead(); // discard misaligned words
             }
@@ -169,8 +155,8 @@ void flushFIFO(LSM6DS3 &myIMU) {
     uint8_t ctrl5    = (odrBits << 3) | 0x06;   // 0x06 = continuous mode
     myIMU.writeRegister(LSM6DS3_ACC_GYRO_FIFO_CTRL5, ctrl5);
 
-    Serial.print("FIFO restarted, CTRL5=0x");
-    Serial.println(ctrl5, HEX);
+    //UNCOMMENT Serial.print("FIFO restarted, CTRL5=0x");
+    //UNCOMMENT Serial.println(ctrl5, HEX);
 }
 
 void verifyIMURegisters(LSM6DS3 &myIMU) {

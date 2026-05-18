@@ -31,7 +31,7 @@ static bool despike(float *data, uint16_t length, bool *is_spike) {
 
                 if (!have_left && run_end >= length) {
                     // Does not make sense
-                    Serial.println("This should be impossible. All spikes.");
+                    //UNCOMMENT Serial.println("This should be impossible. All spikes.");
                     return false;
                 } else if (!have_left) {
                     // Spike run at the very start — extrapolate forward
@@ -50,7 +50,7 @@ static bool despike(float *data, uint16_t length, bool *is_spike) {
                         }
                     } else {
                         // Does not make sense
-                        Serial.println("This should be impossible. Only 1 non-spike");
+                        //UNCOMMENT Serial.println("This should be impossible. Only 1 non-spike");
                         return false;
                     }
                 } else if (run_end >= length) {
@@ -67,7 +67,7 @@ static bool despike(float *data, uint16_t length, bool *is_spike) {
                         }
                     } else {
                         // Does not make sense
-                        Serial.println("This should be impossible. Only 1 non-spike.");
+                        //UNCOMMENT Serial.println("This should be impossible. Only 1 non-spike.");
                         return false;
                     }
                 } else {
@@ -112,12 +112,12 @@ bool clean(float *data, uint16_t length, uint16_t &numSpikes, uint16_t &numUnres
     float prev; 
     bool error = false;
 
-    static bool is_spike[(UNLOADS_PER_DEC+1)* FIFO_THRESHOLD / AXES]; // static to avoid stack pressure
+    static bool is_spike[BUFFER_BASE]; // static to avoid stack pressure
     memset(is_spike, 0, length * sizeof(bool));
     
     for (uint8_t iter = 0; iter < DESPIKE_ITER; iter++) {
         bool have_prev = false;
-        static float valid[(UNLOADS_PER_DEC+1)* FIFO_THRESHOLD / AXES];
+        static float valid[BUFFER_BASE];
         uint16_t valid_count = 0;
         for (uint16_t i = 0; i < length; i++) {
             if (!is_spike[i])  {
@@ -163,7 +163,7 @@ bool clean(float *data, uint16_t length, uint16_t &numSpikes, uint16_t &numUnres
             }
         }
 
-        float sd_floor  = 0.000f;   // TODO: Ask Robyn if this is valid
+        float sd_floor  = 0.005f;   // TODO: Ask Robyn if this is valid
         sd = fmaxf(sd, sd_floor);
 
         // Serial.print("mean: "); Serial.println(mean, 6);
@@ -264,20 +264,20 @@ uint16_t filtDecimate(float *input, uint16_t input_length, float* output, uint16
     float temp;
     uint16_t j = 0;
     uint16_t intermediate_length = (uint16_t)(input_length/DEC1);
-    float intermediate[intermediate_length];
+    float intermediate[intermediate_length+1];
     for (uint16_t i = 0; i < input_length; i++) {
         if (filtDecimate(input[i], temp, sensor.dec.ch1)) {
             detrend(temp, sensor.s_prev);
-            Serial.println(temp, 6);
+            // Serial.println(temp, 6);
             intermediate[j++] = temp;
         }
     }
     
-    //clean(intermediate, intermediate_length, numSpikes, numUnresponsive, sensor, false);
+    clean(intermediate, j, numSpikes, numUnresponsive, sensor, false);
     uint16_t count = 0;
     for (uint16_t i = 0; i < j; i++) {
         if (filtDecimate(intermediate[i], temp, sensor.dec.ch2)) {
-            Serial.println(temp, 6);
+            // Serial.println(temp, 6);
             output[count++] = temp;
         }
     }
@@ -302,8 +302,8 @@ bool filtDecimate(float x, float &output, DecimationChannel &channel) {
 }
 
 uint16_t prepForWrite(float *data, float *output, uint16_t &numSpikes, uint16_t &numUnresponsive, uint16_t length, SensorChannel &sensor) {
-    if (!clean(data, numSpikes, numUnresponsive, length, sensor, true)) {
-        Serial.println("Error in cleaning.");
+    if (!clean(data, length, numSpikes, numUnresponsive, sensor, true)) {
+        //UNCOMMENT Serial.println("Error in cleaning.");
     }
     return filtDecimate(data, length, output, numSpikes, numUnresponsive, sensor);
 }

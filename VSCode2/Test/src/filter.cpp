@@ -126,6 +126,7 @@ bool clean(float *data, uint16_t length, uint16_t &numSpikes, uint16_t &numUnres
         }
 
         if (valid_count < 2) {
+            Serial.println("Fewer than 2 valid samples remain.");
             error = true;
             break;
         }
@@ -273,7 +274,7 @@ uint16_t filtDecimate(float *input, uint16_t input_length, float* output, uint16
         }
     }
     
-    //clean(intermediate, intermediate_length, numSpikes, numUnresponsive, sensor, false);
+    clean(intermediate, intermediate_length, numSpikes, numUnresponsive, sensor, false);
     uint16_t count = 0;
     for (uint16_t i = 0; i < j; i++) {
         if (filtDecimate(intermediate[i], temp, sensor.dec.ch2)) {
@@ -302,8 +303,14 @@ bool filtDecimate(float x, float &output, DecimationChannel &channel) {
 }
 
 uint16_t prepForWrite(float *data, float *output, uint16_t &numSpikes, uint16_t &numUnresponsive, uint16_t length, SensorChannel &sensor) {
-    if (!clean(data, numSpikes, numUnresponsive, length, sensor, true)) {
+    if (!clean(data, length, numSpikes, numUnresponsive, sensor, true)) {
         Serial.println("Error in cleaning.");
     }
+
+    for(int i = 0; i < length; i++) {
+        // Use 6 decimal places to prevent rounding errors in MATLAB
+        Serial.println(data[i], 6); 
+    }
+
     return filtDecimate(data, length, output, numSpikes, numUnresponsive, sensor);
 }
