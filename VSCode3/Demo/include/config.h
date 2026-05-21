@@ -43,7 +43,7 @@
 #define BT_PWR_PIN    A5
 #define SENSING_PIN   A4
 
-#define OFF_TIME  10000L
+#define OFF_TIME  100000L
 
 #define G               -9.80665f
 

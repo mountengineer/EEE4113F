@@ -136,6 +136,7 @@ void loop() {
     break;
     case WAKING_UP:
       currentState = CONFIG;
+      buoyState.mode = 1;
       first = true;
       Serial.println("Woken up.");
     break;
@@ -169,6 +170,9 @@ void GPStoBT() {
     buoyState.lon = gps.longitude();
   }
   buoyState.gpsFix = gps.hasFix();
+  if (buoyState.gpsFix) {
+    Serial.println("GPS ON.");
+  }
 }
 
 void bluetoothTimer() {
