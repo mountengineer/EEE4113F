@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Antarctic Buoy Array — Mission Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+:root{
+  --deep:#060E1A;--panel:#0A1628;--border:rgba(0,200,255,0.15);
+  --signal:#00C8FF;--ok:#00E5A0;--warn:#FFB020;--danger:#FF4560;
+  --dim:rgba(255,255,255,0.35);--text:#E8F4FF;
+  --mono:'Courier New',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--deep);color:var(--text);font-family:'Segoe UI',sans-serif;
+  height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+.topbar{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 20px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0;}
+.topbar-left{display:flex;align-items:center;gap:14px;}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);
+  box-shadow:0 0 8px var(--ok);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.title{font-size:13px;font-weight:600;letter-spacing:0.1em;color:var(--signal);text-transform:uppercase;}
+.subtitle{font-size:10px;color:var(--dim);margin-top:1px;}
+.topbar-right{display:flex;align-items:center;gap:16px;}
+.stat-chip{text-align:center;}
+.stat-chip .val{font-family:var(--mono);font-size:18px;font-weight:bold;color:var(--signal);}
+.stat-chip .lbl{font-size:9px;color:var(--dim);letter-spacing:0.1em;text-transform:uppercase;}
+.utc{font-family:var(--mono);font-size:11px;color:var(--dim);}
+
+.body{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:380px;background:var(--panel);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;}
+.map-area{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+#map{flex:1;}
+
+.sidebar-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;}
+.tab{flex:1;padding:10px;text-align:center;font-size:11px;letter-spacing:0.08em;
+  text-transform:uppercase;cursor:pointer;color:var(--dim);
+  border-bottom:2px solid transparent;transition:all 0.15s;}
+.tab.active{color:var(--signal);border-bottom-color:var(--signal);}
+.tab-pane{display:none;flex:1;overflow-y:auto;padding:12px;}
+.tab-pane.active{display:block;}
+
+.buoy-card{background:rgba(0,200,255,0.04);border:1px solid var(--border);
+  border-radius:6px;padding:12px;margin-bottom:10px;cursor:pointer;transition:border-color 0.15s;}
+.buoy-card:hover,.buoy-card.selected{border-color:var(--signal);}
+.buoy-card.selected{background:rgba(0,200,255,0.08);}
+.bc-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.bc-id{font-family:var(--mono);font-size:13px;font-weight:bold;color:var(--signal);}
+.mode-badge{font-size:9px;padding:2px 8px;border-radius:10px;letter-spacing:0.06em;
+  text-transform:uppercase;font-family:var(--mono);}
+.mode-cal{background:rgba(255,176,32,0.15);color:var(--warn);border:1px solid rgba(255,176,32,0.3);}
+.mode-active{background:rgba(0,229,160,0.15);color:var(--ok);border:1px solid rgba(0,229,160,0.3);}
+.mode-sleep{background:rgba(255,255,255,0.05);color:var(--dim);border:1px solid rgba(255,255,255,0.1);}
+.bc-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.bc-stat .lbl{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em;}
+.bc-stat .val{font-family:var(--mono);font-size:12px;margin-top:1px;}
+.bc-stat .val.ok{color:var(--ok);} .bc-stat .val.warn{color:var(--warn);} .bc-stat .val.dim{color:var(--dim);}
+.bc-footer{margin-top:8px;font-size:10px;color:var(--dim);display:flex;justify-content:space-between;}
+
+.detail-section{margin-bottom:16px;}
+.detail-title{font-size:10px;letter-spacing:0.12em;text-transform:uppercase;
+  color:var(--signal);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border);}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.dstat{background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:4px;padding:8px 10px;}
+.dstat .lbl{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em;}
+.dstat .val{font-family:var(--mono);font-size:14px;margin-top:3px;}
+.dstat .val.ok{color:var(--ok);} .dstat .val.warn{color:var(--warn);}
+.dstat.full{grid-column:1/-1;}
+.dstat.occluded .val{color:var(--dim);font-size:11px;font-style:italic;}
+
+.psd-container{background:rgba(0,0,0,0.4);border:1px solid var(--border);
+  border-radius:4px;padding:8px;margin-top:4px;}
+
+/* Drift path history table */
+.drift-table{width:100%;border-collapse:collapse;font-size:10px;font-family:var(--mono);}
+.drift-table th{padding:4px 8px;text-align:left;color:var(--dim);letter-spacing:0.06em;
+  border-bottom:1px solid var(--border);font-weight:400;}
+.drift-table td{padding:4px 8px;border-bottom:1px solid rgba(255,255,255,0.04);color:var(--text);}
+.drift-table tr:hover td{background:rgba(0,200,255,0.04);}
+.drift-table tr.current td{color:var(--ok);}
+
+.cmd-section{background:rgba(0,0,0,0.2);border:1px solid var(--border);
+  border-radius:6px;padding:12px;margin-bottom:10px;}
+.cmd-title{font-size:10px;color:var(--signal);letter-spacing:0.1em;
+  text-transform:uppercase;margin-bottom:10px;}
+.mode-select{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;}
+.mode-opt{padding:8px 4px;border:1px solid rgba(255,255,255,0.1);border-radius:4px;
+  text-align:center;cursor:pointer;font-size:10px;color:var(--dim);
+  font-family:var(--mono);letter-spacing:0.06em;transition:all 0.15s;text-transform:uppercase;}
+.mode-opt:hover{border-color:rgba(0,200,255,0.4);color:var(--signal);}
+.mode-opt.chosen{border-color:var(--signal);color:var(--signal);background:rgba(0,200,255,0.08);}
+.btn-cmd{width:100%;padding:10px;background:rgba(0,229,160,0.08);
+  border:1px solid var(--ok);border-radius:4px;color:var(--ok);
+  font-family:var(--mono);font-size:11px;letter-spacing:0.08em;
+  text-transform:uppercase;cursor:pointer;transition:all 0.15s;}
+.btn-cmd:hover:not(:disabled){background:rgba(0,229,160,0.15);}
+.btn-cmd:disabled{opacity:0.3;cursor:not-allowed;}
+.btn-ble{background:rgba(0,200,255,0.08);border-color:var(--signal);color:var(--signal);}
+.btn-ble:hover:not(:disabled){background:rgba(0,200,255,0.15)!important;}
+.cmd-log{background:#000;border-radius:4px;padding:8px;height:80px;
+  overflow-y:auto;font-family:var(--mono);font-size:10px;margin-top:8px;}
+.log-tx{color:rgba(0,200,255,0.7);} .log-rx{color:var(--ok);}
+.log-sys{color:var(--dim);} .log-err{color:var(--danger);}
+
+#map{background:#0A1525;}
+.leaflet-container{background:#0A1525;}
+.buoy-marker{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-family:var(--mono);font-size:11px;font-weight:bold;
+  border:2px solid;cursor:pointer;box-shadow:0 0 12px rgba(0,0,0,0.5);}
+.marker-active{background:rgba(0,229,160,0.2);border-color:var(--ok);color:var(--ok);}
+.marker-sleep{background:rgba(100,100,100,0.2);border-color:rgba(150,150,150,0.5);color:var(--dim);}
+.marker-cal{background:rgba(255,176,32,0.2);border-color:var(--warn);color:var(--warn);}
+.leaflet-popup-content-wrapper{background:var(--panel);border:1px solid var(--border);
+  border-radius:6px;color:var(--text);box-shadow:0 4px 20px rgba(0,0,0,0.5);}
+.leaflet-popup-tip{background:var(--panel);}
+.popup-inner{padding:2px;min-width:180px;}
+.popup-title{font-family:var(--mono);font-size:12px;color:var(--signal);margin-bottom:6px;}
+.popup-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;}
+.popup-row .k{color:var(--dim);} .popup-row .v{font-family:var(--mono);}
+
+.map-bottom{padding:8px 14px;background:var(--panel);border-top:1px solid var(--border);
+  display:flex;align-items:center;gap:20px;flex-shrink:0;}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--dim);}
+.legend-dot{width:8px;height:8px;border-radius:50%;}
+.refresh-info{margin-left:auto;font-size:10px;color:var(--dim);font-family:var(--mono);}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(0,200,255,0.2);border-radius:2px;}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);
+  z-index:2000;display:none;align-items:center;justify-content:center;}
+.modal-overlay.show{display:flex;}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:8px;
+  padding:24px;width:360px;max-width:90vw;}
+.modal-title{font-family:var(--mono);font-size:13px;color:var(--signal);
+  text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px;}
+.modal-sub{font-size:11px;color:var(--dim);margin-bottom:16px;line-height:1.6;}
+.ble-status{padding:8px 12px;background:rgba(0,0,0,0.3);border-radius:4px;
+  font-family:var(--mono);font-size:11px;margin-bottom:10px;min-height:32px;}
+.modal-btns{display:flex;gap:8px;}
+.btn-modal{flex:1;padding:10px;border-radius:4px;border:1px solid;
+  font-family:var(--mono);font-size:11px;letter-spacing:0.08em;
+  text-transform:uppercase;cursor:pointer;transition:all 0.15s;}
+.btn-connect-ble{background:rgba(0,200,255,0.08);border-color:var(--signal);color:var(--signal);}
+.btn-connect-ble:hover{background:rgba(0,200,255,0.18);}
+.btn-close-modal{background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.15);color:var(--dim);}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="pulse"></div>
+    <div>
+      <div class="title">Antarctic Buoy Array — Mission Control</div>
+      <div class="subtitle">Communications Subsystem Dashboard — EEE4113F</div>
+    </div>
+    <!-- HC-05 serial bridge status pill -->
+    <div id="bridgePill" style="display:flex;align-items:center;gap:6px;
+         padding:4px 10px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);
+         background:rgba(0,0,0,0.2);margin-left:8px;">
+      <div id="bridgeDot" style="width:7px;height:7px;border-radius:50%;
+           background:rgba(255,255,255,0.2);flex-shrink:0;transition:background .4s;"></div>
+      <span id="bridgeLabel" style="font-size:10px;color:var(--dim);
+            font-family:var(--mono);letter-spacing:0.08em;white-space:nowrap;">BRIDGE —</span>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <button class="btn-cmd btn-ble" onclick="openAddBuoyModal()" style="padding: 6px 12px; margin-right: 15px;">+ Add Buoy</button>
+    <div class="stat-chip"><div class="val" id="topActive">0</div><div class="lbl">Active</div></div>
+    <div class="stat-chip"><div class="val" id="topTotal">0</div><div class="lbl">Total</div></div>
+    <div class="stat-chip"><div class="val" id="topAvgHs">—</div><div class="lbl">Avg Hs (m)</div></div>
+    <div class="utc" id="utcClock">—</div>
+       
+  </div>
+</div>
+
+
+<div class="body">
+  <div class="sidebar">
+    <div class="sidebar-tabs">
+      <div class="tab active" onclick="showTab('fleet')">Fleet</div>
+      <div class="tab" onclick="showTab('detail')">Detail</div>
+      <div class="tab" onclick="showTab('history')">History</div>
+      <div class="tab" onclick="showTab('command')">Cmd</div>
+      <div class="tab" onclick="showTab('hc05')" id="tabHc05" style="color:var(--signal);border-bottom-color:transparent;">HC-05</div>
+    </div>
+
+    <div class="tab-pane active" id="tab-fleet">
+      <div id="buoyCardContainer"></div>
+    </div>
+
+    <div class="tab-pane" id="tab-detail">
+      <div id="detailContent">
+        <p style="color:var(--dim);font-size:12px;padding:10px 0;">Select a buoy from Fleet or the map.</p>
+      </div>
+    </div>
+
+    <!-- HISTORY / DRIFT PATH TAB -->
+    <div class="tab-pane" id="tab-history">
+      <div style="margin-bottom:10px;">
+        <select id="historyBuoySelect" onchange="renderHistory()" style="width:100%;padding:8px;
+          background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:4px;
+          color:var(--text);font-size:12px;font-family:var(--mono);">
+          <option value="">— Select buoy —</option>
+        </select>
+      </div>
+      <div id="historyStats" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;"></div>
+      <div class="detail-title">Drift path log</div>
+      <div id="historyTable"></div>
+      <div style="margin-top:10px;">
+        <button class="btn-cmd" onclick="exportCSV()" style="margin-bottom:6px;">↓ Export CSV</button>
+        <button class="btn-cmd btn-ble" onclick="showDriftPath()">⬡ Show on map</button>
+      </div>
+    </div>
+
+    <div class="tab-pane" id="tab-command">
+      <div class="cmd-section">
+        <div class="cmd-title">Target buoy</div>
+        <select id="cmdTarget" style="width:100%;padding:8px;background:rgba(0,0,0,0.3);
+          border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;
+          font-family:var(--mono);">
+          <option value="">— Select buoy —</option>
+        </select>
+      </div>
+      <div class="cmd-section">
+        <div class="cmd-title">Operating mode</div>
+        <div class="mode-select">
+          <div class="mode-opt" onclick="selectCmd(this,'01')">Calibration<br><span style="font-size:8px;opacity:0.5">0x01</span></div>
+          <div class="mode-opt" onclick="selectCmd(this,'02')">Active<br><span style="font-size:8px;opacity:0.5">0x02</span></div>
+          <div class="mode-opt" onclick="selectCmd(this,'03')">Low Power<br><span style="font-size:8px;opacity:0.5">0x03</span></div>
+        </div>
+        <button class="btn-cmd" id="btnSendCmd" onclick="sendIridiumCommand()" disabled>
+          ↑ Queue Iridium MT command
+        </button>
+      </div>
+      <div class="cmd-section">
+        <div class="cmd-title">Serial Bridge (HC-05)</div>
+        <p style="font-size:10px;color:var(--dim);margin-bottom:8px;line-height:1.6;">
+          Data arriving from the ESP via HC-05 Bluetooth serial is forwarded here
+          automatically by the Python bridge running on this machine.<br>
+          Any valid telemetry JSON is saved to the database immediately.
+        </p>
+        <!-- Bridge connection state row -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <div id="bridgeCmdDot" style="width:8px;height:8px;border-radius:50%;
+               background:rgba(255,255,255,0.15);flex-shrink:0;transition:background .4s;"></div>
+          <span id="bridgeCmdLabel" style="font-size:11px;color:var(--dim);font-family:var(--mono);">Not connected</span>
+        </div>
+        <!-- Live message feed from HC-05 -->
+        <div style="font-size:9px;color:var(--signal);letter-spacing:0.1em;
+             text-transform:uppercase;margin-bottom:4px;">Live feed</div>
+        <div id="bridgeLog" style="background:#000;border-radius:4px;padding:8px;
+             height:110px;overflow-y:auto;font-family:var(--mono);font-size:10px;"></div>
+      </div>
+      <div class="cmd-section">
+        <div class="cmd-title">Bluetooth (ship-side)</div>
+        <p style="font-size:10px;color:var(--dim);margin-bottom:8px;line-height:1.6;">
+          Direct BLE link for buoy deployment, IMU streaming, and LoRa testing.
+        </p>
+        <button class="btn-cmd btn-ble" onclick="showTab('hc05')">⬡ Go to HC-05 tab →</button>
+      </div>
+      <div class="cmd-section">
+        <div class="cmd-title">Command log</div>
+        <div class="cmd-log" id="cmdLog"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════ HC-05 SERIAL COMMAND TAB ══════════════ -->
+    <div class="tab-pane" id="tab-hc05">
+
+      <!-- Bridge status banner (read-only — reflects Python bridge) -->
+      <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;
+           background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:5px;margin-bottom:12px;">
+        <div id="hc05Dot" style="width:9px;height:9px;border-radius:50%;
+             background:rgba(255,255,255,0.15);flex-shrink:0;transition:background .4s,box-shadow .4s;"></div>
+        <span id="hc05Status" style="flex:1;font-family:var(--mono);font-size:11px;color:var(--dim);">
+          Bridge not connected
+        </span>
+      </div>
+
+      <!-- ── Quick-action grid ── -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px;">
+
+        <button class="btn-modal btn-connect-ble" id="btnHcStatus"
+                onclick="serialSend('STATUS')" disabled
+                style="padding:9px 4px;font-size:10px;">📡 Status</button>
+
+        <button class="btn-modal btn-connect-ble" id="btnHcSD"
+                onclick="serialSend('GET_SD')" disabled
+                style="padding:9px 4px;font-size:10px;">💾 SD Data</button>
+
+        <button class="btn-modal btn-connect-ble" id="btnHcBtOff"
+                onclick="serialSend('BT_OFF')" disabled
+                style="padding:9px 4px;font-size:10px;
+                       background:rgba(255,176,32,0.06);border-color:var(--warn);color:var(--warn);">
+          🔵 BT Off</button>
+
+        <button class="btn-modal btn-connect-ble" id="btnHcLive"
+                onclick="hcStartLive()" disabled
+                style="padding:9px 4px;font-size:10px;">▶ Live IMU</button>
+
+        <button class="btn-modal btn-connect-ble" id="btnHcStop"
+                onclick="hcStopLive()" disabled
+                style="padding:9px 4px;font-size:10px;
+                       background:rgba(255,69,96,0.08);border-color:var(--danger);color:var(--danger);">
+          ■ Stop</button>
+
+        <button class="btn-modal btn-connect-ble" id="btnHcLora"
+                onclick="hcSendLora()" disabled
+                style="padding:9px 4px;font-size:10px;">📶 LoRa</button>
+
+      </div>
+
+      <!-- LoRa packet content input -->
+      <div style="background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:4px;
+           padding:10px;margin-bottom:10px;">
+        <div style="font-size:9px;color:var(--signal);letter-spacing:0.1em;
+             text-transform:uppercase;margin-bottom:6px;">LoRa Test Packet</div>
+        <input id="hcLoraInput" placeholder="Custom content (blank = default PING)…"
+               style="width:100%;padding:7px 9px;background:rgba(0,0,0,0.4);
+                      border:1px solid var(--border);border-radius:4px;color:var(--text);
+                      font-family:var(--mono);font-size:11px;margin-bottom:6px;box-sizing:border-box;"/>
+        <button class="btn-cmd btn-ble" id="btnHcLoraSend" onclick="hcSendLora()" disabled
+                style="width:100%;padding:8px;">📶 Send LoRa Packet</button>
+      </div>
+
+      <!-- ── Buoy snapshot panel (appears on STATUS) ── -->
+      <div id="hcSnapshot" style="display:none;background:rgba(0,0,0,0.3);
+           border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:10px;
+           transition:all .3s;">
+        <div style="font-size:9px;color:var(--signal);letter-spacing:0.1em;
+             text-transform:uppercase;margin-bottom:8px;">Buoy Snapshot</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;
+             font-family:var(--mono);font-size:11px;">
+          <div><div style="font-size:9px;color:var(--dim)">NODE ID</div><div id="bss-id">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">MODE</div><div id="bss-mode">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">GPS FIX</div><div id="bss-gps">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">LAT</div><div id="bss-lat">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">LON</div><div id="bss-lon">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">BATTERY</div><div id="bss-bat">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">LoRa OK</div><div id="bss-lora">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">RSSI</div><div id="bss-rssi">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">UPTIME</div><div id="bss-uptime">—</div></div>
+        </div>
+      </div>
+
+      <!-- ── Mode change panel (appears after STATUS) ── -->
+      <div id="hcModePanel" style="display:none;background:rgba(0,0,0,0.2);
+           border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:10px;">
+        <div style="font-size:9px;color:var(--signal);letter-spacing:0.1em;
+             text-transform:uppercase;margin-bottom:6px;">Set Operating Mode</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
+          <div class="mode-opt" id="hcModeOpt1" onclick="selectHcMode(this,1)">
+            Calibration<br><span style="font-size:8px;opacity:0.5">0x01</span></div>
+          <div class="mode-opt" id="hcModeOpt2" onclick="selectHcMode(this,2)">
+            Active<br><span style="font-size:8px;opacity:0.5">0x02</span></div>
+          <div class="mode-opt" id="hcModeOpt3" onclick="selectHcMode(this,3)">
+            Low Power<br><span style="font-size:8px;opacity:0.5">0x03</span></div>
+        </div>
+        <button class="btn-cmd" id="btnHcSendMode" onclick="hcSendMode()" disabled
+                style="width:100%;padding:8px;">↑ Send Mode Change</button>
+      </div>
+
+      <!-- ── Live IMU panel (appears on GET_LIVE) ── -->
+      <div id="hcImuDisplay" style="display:none;background:rgba(0,0,0,0.3);
+           border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:10px;">
+        <div style="font-size:9px;color:var(--signal);letter-spacing:0.1em;
+             text-transform:uppercase;margin-bottom:6px;">
+          Live IMU Stream
+          <span id="imuFrameCount" style="color:var(--dim);font-weight:400;
+                text-transform:none;font-size:9px;"></span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-family:var(--mono);font-size:12px;">
+          <div><div style="font-size:9px;color:var(--dim)">Ax (g)</div><div id="imu-ax">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">Ay (g)</div><div id="imu-ay">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">Az (g)</div><div id="imu-az">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">Gx (°/s)</div><div id="imu-gx">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">Gy (°/s)</div><div id="imu-gy">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">Gz (°/s)</div><div id="imu-gz">—</div></div>
+        </div>
+      </div>
+
+      <!-- ── LoRa result panel (appears after LORA_TEST) ── -->
+      <div id="hcLoraResult" style="display:none;background:rgba(0,0,0,0.3);
+           border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:10px;">
+        <div style="font-size:9px;color:var(--signal);letter-spacing:0.1em;
+             text-transform:uppercase;margin-bottom:6px;">LoRa Last Result</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;
+             font-family:var(--mono);font-size:12px;">
+          <div><div style="font-size:9px;color:var(--dim)">Sent</div><div id="lora-sent">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">ACK</div><div id="lora-ack">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">RSSI</div><div id="lora-rssi">—</div></div>
+        
+        </div>
+      </div>
+
+      <!-- ── SD card panel (appears after GET_SD) ── -->
+      <div id="hcSDDisplay" style="display:none;background:rgba(0,0,0,0.3);
+           border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:10px;">
+        <div style="font-size:9px;color:var(--signal);letter-spacing:0.1em;
+             text-transform:uppercase;margin-bottom:6px;">SD Card — Processed Data</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;
+             font-family:var(--mono);font-size:11px;margin-bottom:8px;">
+          <div><div style="font-size:9px;color:var(--dim)">Hs (m)</div><div id="sd-hs">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">Tz (s)</div><div id="sd-tz">—</div></div>
+          <div><div style="font-size:9px;color:var(--dim)">Records</div><div id="sd-recs">—</div></div>
+        </div>
+        <div style="font-size:9px;color:var(--dim);margin-bottom:3px;">Power Spectral Density</div>
+        <canvas id="blePsdCanvas" width="340" height="60"
+                style="width:100%;border-radius:2px;background:rgba(0,0,0,0.2);"></canvas>
+      </div>
+
+      <!-- ── Scrollable log ── -->
+      <div style="font-size:9px;color:var(--signal);letter-spacing:0.1em;
+           text-transform:uppercase;margin-bottom:4px;">Serial Log</div>
+      <div class="cmd-log" id="hc05Log" style="height:150px;"></div>
+
+    </div><!-- end tab-hc05 -->
+
+  </div><!-- end sidebar -->
+
+  <div class="map-area">
+    <div id="map"></div>
+    <div class="map-bottom">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--ok)"></div>Active sensing</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--warn)"></div>Calibration</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--dim)"></div>Low power</div>
+      <div class="legend-item" style="margin-left:8px;">
+        <input type="checkbox" id="showDrift" onchange="toggleDriftLines()" style="cursor:pointer;">
+        <span style="margin-left:4px;cursor:pointer;" onclick="document.getElementById('showDrift').click()">Show drift paths</span>
+      </div>
+      <div class="refresh-info" id="refreshInfo">Mock data mode</div>
+    </div>
+  </div>
+</div>
+
+<!-- bleModal removed — BLE interface is now in the BLE sidebar tab -->
+<div id="bleModal" style="display:none;"></div>
+
+<div class="modal-overlay" id="addBuoyModal">
+  <div class="modal">
+    <div class="modal-title">Register New Buoy</div>
+    <div class="modal-sub">Add a new node to the fleet database.</div>
+    <div style="margin-bottom: 16px;">
+      <input type="text" id="newBuoyId" placeholder="Node ID (e.g., 05)" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: var(--mono); margin-bottom: 10px;">
+      <select id="newBuoyMode" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: var(--mono);">
+        <option value="01">Calibration (01)</option>
+        <option value="02">Active Sensing (02)</option>
+        <option value="03">Low Power (03)</option>
+      </select>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-modal btn-connect-ble" onclick="submitNewBuoy()">Register</button>
+      <button class="btn-modal btn-close-modal" onclick="closeAddBuoyModal()">Cancel</button>
+    </div>
+  </div>
+
+</div>
+<script>
+const MODE_NAMES = {'01':'Calibration','02':'Active Sensing','03':'Low Power'};
+const MODE_CSS   = {'01':'mode-cal','02':'mode-active','03':'mode-sleep'};
+const MARKER_CSS = {'01':'marker-cal','02':'marker-active','03':'marker-sleep'};
+const DRIFT_COLORS = {'01':'#00E5A0','02':'#00C8FF','03':'#FFB020','04':'#FF6B8A'};
+
+let buoys = {};
+let db = {};           // database: db[nodeID] = array of telemetry records
+let markers = {};
+let driftPolylines = {};
+let driftVisible = false;
+let selectedBuoy = null;
+let selectedCmdMode = null;
+let map;
+let driftPaths = {}; // Stores the Leaflet line objects so we can redraw them
+
+
+// ─── FETCH FROM BACKEND ──────────────────────────────────────────
+async function fetchFleetData() {
+  try {
+    const response = await fetch('http://127.0.0.1:5000/api/buoys');
+    if (response.ok) {
+      const liveData = await response.json();
+      document.getElementById('refreshInfo').textContent = 'Last update: ' + new Date().toTimeString().slice(0,8) + ' UTC';
+      
+      // Loop through the data from the database
+      for (const [id, bData] of Object.entries(liveData)) {
+        // Update our local buoys object
+        if (!buoys[id]) {
+          buoys[id] = {};
+        }
+        
+        buoys[id] = {
+          id:       bData.id,
+          mode:     bData.mode,
+          lat:      bData.lat  !== null ? bData.lat  : -62.5,
+          lon:      bData.lon  !== null ? bData.lon  : -58.8,
+          Hs:       bData.Hs,
+          psd:      null,
+          battery:  null,                       // not implemented in hardware
+          // lastSeen comes as Unix ms integer from fixed backend
+          lastSeen: typeof bData.lastSeen === 'number'
+                      ? bData.lastSeen
+                      : new Date(bData.lastSeen).getTime(),
+          gpsFix:   bData.gpsFix === true,
+          loraRSSI: bData.loraRSSI !== null ? bData.loraRSSI : -120,
+          
+        };
+        
+        if (!db[id]) db[id] = []; // Ensure history array exists
+      }
+      
+      // Tell the UI to redraw using the new database data
+      renderFleetCards();
+      updateMarkers();
+      updateTopBar();
+      populateDropdowns();
+    }
+  } catch (error) {
+    console.log("Could not connect to backend to fetch buoys.");
+  }
+}
+
+// ─── FETCH & DRAW PATH HISTORY ───────────────────────────────────
+async function fetchFleetHistory() {
+  // Fetches full telemetry records from the backend, populates db[] for the
+  // history table and drift path drawing. Replaces the old coord-only version.
+  try {
+    const response = await fetch('http://127.0.0.1:5000/api/history');
+    if (!response.ok) return;
+    const historyData = await response.json();
+
+    for (const [id, records] of Object.entries(historyData)) {
+      // Populate db[] with full records so renderHistory() and exportCSV() work
+      db[id] = records.map(r => ({
+        ts:   r.ts,
+        lat:  r.lat,
+        lon:  r.lon,
+        Hs:   r.Hs,
+        rssi: r.rssi !== null ? r.rssi : -120,
+        
+        mode: r.mode,
+        seq:  0
+      }));
+    }
+
+    // Redraw drift lines if they are currently toggled on
+    if (driftVisible) drawDriftLines();
+
+    // Refresh history table if it is open
+    const histId = document.getElementById('historyBuoySelect').value;
+    if (histId) renderHistory();
+
+  } catch (error) {
+    console.log("Could not fetch history from backend.");
+  }
+}
+// ─── DATABASE SCHEMA (in-memory, SQLite-ready structure) ──────────
+// db[nodeID] = [
+//   { ts, lat, lon, mode, Hs, loraRSSI, loraSNR, seqNum }
+//   ...sorted by ts ascending
+// ]
+//
+// BACKEND NOTE: In production, this is replaced by:
+//   GET /api/buoys/{id}/history?limit=200
+//   which queries: SELECT ts,lat,lon,mode,Hs,rssi,snr
+//                  FROM telemetry WHERE node_id=? ORDER BY ts DESC LIMIT 200
+//   SQLite schema:
+//     CREATE TABLE telemetry (
+//       id INTEGER PRIMARY KEY,
+//       node_id TEXT NOT NULL,
+//       ts INTEGER NOT NULL,         -- Unix timestamp
+//       lat REAL, lon REAL,
+//       mode TEXT, Hs REAL,
+//       rssi REAL, snr REAL,
+//       seq INTEGER
+//     );
+//     CREATE INDEX idx_node_ts ON telemetry(node_id, ts DESC);
+
+function initMockData() {
+  const nodes = [
+    {id:'01', mode:'02', lat:-62.4,  lon:-58.3,  Hs:3.24, rssi:-112.3},
+    {id:'02', mode:'02', lat:-63.1,  lon:-57.1,  Hs:3.87, rssi:-118.7},
+    {id:'03', mode:'03', lat:-61.8,  lon:-59.8,  Hs:2.91, rssi:-124.22},
+    {id:'04', mode:'01', lat:-62.9,  lon:-60.5,  Hs:null,  rssi:-108.5},
+  ];
+  const now = Date.now();
+  nodes.forEach(n => {
+    db[n.id] = [];
+    // Seed 48 historical records (one per 30 min = 24h of history)
+    let lat = n.lat - 0.08, lon = n.lon - 0.08;
+    for (let i = 48; i >= 0; i--) {
+      lat += (Math.random()-0.45)*0.008;
+      lon += (Math.random()-0.45)*0.008;
+      db[n.id].push({
+        ts: now - i*30*60*1000,
+        lat: parseFloat(lat.toFixed(5)),
+        lon: parseFloat(lon.toFixed(5)),
+        mode: n.mode,
+        Hs: n.Hs ? parseFloat((n.Hs + (Math.random()-0.5)*0.3).toFixed(2)) : null,
+        rssi: parseFloat((n.rssi + (Math.random()-0.5)*4).toFixed(1)),
+        seq: 48 - i
+      });
+    }
+    const latest = db[n.id][db[n.id].length-1];
+    buoys[n.id] = {
+      id: n.id, mode: n.mode,
+      lat: latest.lat, lon: latest.lon,
+      gpsFix: n.id !== '04',
+      loraRSSI: latest.rssi,
+      Hs: latest.Hs,
+      psd: n.Hs ? generatePSD() : null,
+      lastSeen: latest.ts
+    };
+  });
+}
+
+function generatePSD() {
+  return Array.from({length:15},(_,i)=>{
+    const f=i/14; return parseFloat((Math.exp(-((f-0.35)**2)/0.04)*(2.5+Math.random()*0.5)).toFixed(3));
+  });
+}
+
+// ─── MAP ──────────────────────────────────────────────────────────
+function initMap() {
+  map = L.map('map',{center:[-62.5,-58.8],zoom:7,zoomControl:true});
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+    attribution:'© OpenStreetMap © CARTO',maxZoom:18}).addTo(map);
+}
+
+function updateMarkers() {
+  Object.values(buoys).forEach(b=>{
+    const mCss = MARKER_CSS[b.mode]||'marker-sleep';
+    const icon = L.divIcon({html:`<div class="buoy-marker ${mCss}">${b.id}</div>`,
+      className:'',iconSize:[36,36],iconAnchor:[18,18]});
+    const ageMins = Math.round((Date.now()-b.lastSeen)/60000);
+    const popup = `<div class="popup-inner">
+      <div class="popup-title">Buoy ${b.id}</div>
+      <div class="popup-row"><span class="k">Mode</span><span class="v">${MODE_NAMES[b.mode]}</span></div>
+      <div class="popup-row"><span class="k">GPS Fix</span><span class="v">${b.gpsFix?'YES':'NO'}</span></div>
+      <div class="popup-row"><span class="k">Hs</span><span class="v">${b.Hs?b.Hs.toFixed(2)+' m':'—'}</span></div>
+      <div class="popup-row"><span class="k">Last seen</span><span class="v">${ageMins}m ago</span></div>
+      <div class="popup-row"><span class="k">RSSI</span><span class="v">${b.loraRSSI != null ? b.loraRSSI.toFixed(1)+' dBm' : '—'}</span></div>
+    </div>`;
+    if(markers[b.id]){
+      markers[b.id].setLatLng([b.lat,b.lon]);
+      markers[b.id].setIcon(icon);
+      markers[b.id].setPopupContent(popup);
+    } else {
+      const m = L.marker([b.lat,b.lon],{icon}).addTo(map).bindPopup(popup);
+      m.on('click',()=>selectBuoy(b.id));
+      markers[b.id]=m;
+    }
+  });
+}
+
+function toggleDriftLines() {
+  driftVisible = document.getElementById('showDrift').checked;
+  if (driftVisible) {
+    drawDriftLines();
+  } else {
+    // Remove all polylines from the map
+    Object.values(driftPolylines).forEach(pl => map.removeLayer(pl));
+    driftPolylines = {};
+  }
+}
+
+// Unified polyline drawing — called by both toggleDriftLines and fetchFleetHistory
+function drawDriftLines() {
+  // Remove stale lines before redrawing
+  Object.values(driftPolylines).forEach(pl => map.removeLayer(pl));
+  driftPolylines = {};
+
+  Object.keys(db).forEach(id => {
+    const pts = db[id]
+      .filter(r => r.lat !== null && r.lon !== null)
+      .map(r => [r.lat, r.lon]);
+    if (pts.length < 2) return;
+    driftPolylines[id] = L.polyline(pts, {
+      color:     DRIFT_COLORS[id] || '#00C8FF',
+      weight:    2,
+      opacity:   0.7,
+      dashArray: '4 4'
+    }).addTo(map);
+  });
+}
+
+function showDriftPath() {
+  const id = document.getElementById('historyBuoySelect').value;
+  if (!id || !db[id] || db[id].length === 0) return;
+  document.getElementById('showDrift').checked = true;
+  driftVisible = true;
+  drawDriftLines();
+  const pts = db[id]
+    .filter(r => r.lat !== null && r.lon !== null)
+    .map(r => [r.lat, r.lon]);
+  if (pts.length > 0) map.fitBounds(L.latLngBounds(pts), {padding:[30,30]});
+}
+
+// ─── FLEET CARDS ─────────────────────────────────────────────────
+function renderFleetCards() {
+  const c = document.getElementById('buoyCardContainer');
+  c.innerHTML='';
+  Object.values(buoys).sort((a,b)=>a.id.localeCompare(b.id)).forEach(b=>{
+    const ageSec = Math.round((Date.now()-b.lastSeen)/1000);
+    const ageStr = ageSec<60?ageSec+'s':Math.round(ageSec/60)+'m';
+    const gpsClass = b.gpsFix?'ok':'warn';
+    const rssiClass = b.loraRSSI==null?'dim':b.loraRSSI>-120?'ok':b.loraRSSI>-135?'warn':'dim';
+    const div=document.createElement('div');
+    div.className='buoy-card'+(selectedBuoy===b.id?' selected':'');
+    div.id='card-'+b.id;
+    div.onclick=()=>selectBuoy(b.id);
+    div.innerHTML=`
+      <div class="bc-header">
+        <span class="bc-id">BUOY ${b.id}</span>
+        <span class="mode-badge ${MODE_CSS[b.mode]}">${MODE_NAMES[b.mode]}</span>
+      </div>
+      <div class="bc-grid">
+        <div class="bc-stat"><div class="lbl">GPS Fix</div><div class="val ${gpsClass}">${b.gpsFix?'YES':'NO FIX'}</div></div>
+        <div class="bc-stat"><div class="lbl">Hs</div><div class="val">${b.Hs?b.Hs.toFixed(2)+' m':'—'}</div></div>
+        <div class="bc-stat"><div class="lbl">RSSI</div><div class="val ${rssiClass}">${b.loraRSSI != null ? b.loraRSSI.toFixed(1)+' dBm' : '—'}</div></div>
+        <div class="bc-stat"><div class="lbl">Battery</div><div class="val dim">— (N/A)</div></div>
+      </div>
+      <div class="bc-footer">
+        <span>(${b.lat.toFixed(3)}, ${b.lon.toFixed(3)})</span>
+        <span>Last: ${ageStr} ago</span>
+      </div>`;
+    c.appendChild(div);
+  });
+}
+
+// ─── DETAIL PANEL ────────────────────────────────────────────────
+function renderDetail(id) {
+  const b = buoys[id]; if(!b) return;
+  const ageMins = ((Date.now()-b.lastSeen)/60000).toFixed(1);
+  const gpsClass = b.gpsFix?'ok':'warn';
+  document.getElementById('detailContent').innerHTML=`
+    <div class="detail-section">
+      <div class="detail-title">Buoy ${id} — ${MODE_NAMES[b.mode]}</div>
+      <div class="detail-grid">
+        <div class="dstat"><div class="lbl">Latitude</div><div class="val">${b.lat.toFixed(5)}°</div></div>
+        <div class="dstat"><div class="lbl">Longitude</div><div class="val">${b.lon.toFixed(5)}°</div></div>
+        <div class="dstat"><div class="lbl">GPS Fix</div><div class="val ${gpsClass}">${b.gpsFix?'Acquired':'No Fix'}</div></div>
+        <div class="dstat occluded"><div class="lbl">Battery</div><div class="val">— (not implemented in current hardware)</div></div>
+        <div class="dstat"><div class="lbl">LoRa RSSI</div><div class="val">${b.loraRSSI != null ? b.loraRSSI.toFixed(1)+' dBm' : '—'}</div></div>
+        
+        <div class="dstat full"><div class="lbl">Last received</div><div class="val">${ageMins} min ago</div></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-title">Wave data</div>
+      <div class="detail-grid">
+        <div class="dstat full">
+          <div class="lbl">Significant wave height (Hs)</div>
+          <div class="val" style="font-size:22px;color:var(--signal)">${b.Hs?b.Hs.toFixed(2)+' m':'— (calibrating)'}</div>
+        </div>
+      </div>
+      ${b.psd?`<div class="psd-container">
+        <div class="lbl" style="font-size:9px;margin-bottom:4px;">Power spectral density (relative units)</div>
+        <canvas id="psdCanvas" width="280" height="80"></canvas>
+      </div>`:`<p style="font-size:11px;color:var(--dim);margin-top:8px;">PSD not yet available</p>`}
+    </div>
+    <div class="detail-section">
+      <div class="detail-title">Drift history</div>
+      <p style="font-size:10px;color:var(--dim);margin-bottom:6px;">${db[id]?db[id].length:0} records stored</p>
+      <button class="btn-cmd" onclick="showTab('history');document.getElementById('historyBuoySelect').value='${id}';renderHistory();" style="width:100%;">View drift path →</button>
+    </div>`;
+  if(b.psd) setTimeout(()=>drawPSD(b.psd),0);
+}
+
+function drawPSD(data) {
+  const canvas=document.getElementById('psdCanvas'); if(!canvas) return;
+  const ctx=canvas.getContext('2d'); const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const max=Math.max(...data); const bW=W/data.length;
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(0,200,255,0.8)'); grad.addColorStop(1,'rgba(0,200,255,0.1)');
+  ctx.fillStyle=grad;
+  data.forEach((v,i)=>{const h=(v/max)*(H-4); ctx.fillRect(i*bW+1,H-h,bW-2,h);});
+  ctx.strokeStyle='rgba(255,255,255,0.1)';
+  ctx.beginPath(); ctx.moveTo(0,H-1); ctx.lineTo(W,H-1); ctx.stroke();
+}
+
+// ─── HISTORY / DRIFT PATH ────────────────────────────────────────
+function renderHistory() {
+  const id = document.getElementById('historyBuoySelect').value;
+  const statsEl = document.getElementById('historyStats');
+  const tableEl = document.getElementById('historyTable');
+  if(!id||!db[id]) { statsEl.innerHTML=''; tableEl.innerHTML=''; return; }
+
+  const records = db[id];
+  const lats = records.map(r=>r.lat), lons = records.map(r=>r.lon);
+  const drifts = records.slice(1).map((r,i)=>haversineDist(records[i],r));
+  const totalDrift = drifts.reduce((s,d)=>s+d,0);
+  const Hs_valid = records.filter(r=>r.Hs!==null).map(r=>r.Hs);
+  const avgHs = Hs_valid.length ? (Hs_valid.reduce((s,v)=>s+v,0)/Hs_valid.length).toFixed(2) : '—';
+
+  statsEl.innerHTML=`
+    <div class="dstat"><div class="lbl">Records</div><div class="val">${records.length}</div></div>
+    <div class="dstat"><div class="lbl">Total drift</div><div class="val">${totalDrift.toFixed(2)} km</div></div>
+    <div class="dstat"><div class="lbl">Avg Hs</div><div class="val">${avgHs} m</div></div>
+    <div class="dstat"><div class="lbl">Lat range</div><div class="val">${(Math.max(...lats)-Math.min(...lats)).toFixed(3)}°</div></div>`;
+
+  const rows = records.slice(-20).reverse().map((r,i)=>{
+    const d = i===records.slice(-20).length-1 ? '' :
+      haversineDist(records[records.length-20+records.slice(-20).length-1-i-1],r).toFixed(3);
+    const isCurrent = i===0;
+    return `<tr class="${isCurrent?'current':''}">
+      <td>${new Date(r.ts).toISOString().slice(11,16)}</td>
+      <td>${r.lat.toFixed(4)}</td>
+      <td>${r.lon.toFixed(4)}</td>
+      <td>${r.Hs?r.Hs.toFixed(2):'—'}</td>
+      <td>${r.rssi != null ? r.rssi.toFixed(1) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  tableEl.innerHTML=`
+    <p style="font-size:9px;color:var(--dim);margin-bottom:6px;">Showing last 20 records. Green = most recent.</p>
+    <table class="drift-table">
+      <thead><tr><th>Time (UTC)</th><th>Lat</th><th>Lon</th><th>Hs (m)</th><th>RSSI</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function haversineDist(a,b) {
+  const R=6371, toRad=d=>d*Math.PI/180;
+  const dLat=toRad(b.lat-a.lat), dLon=toRad(b.lon-a.lon);
+  const ha=Math.sin(dLat/2)**2+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+  return R*2*Math.asin(Math.sqrt(ha));
+}
+
+function exportCSV() {
+  const id = document.getElementById('historyBuoySelect').value;
+  if(!id||!db[id]) return;
+  const header='timestamp_utc,lat,lon,mode,Hs_m,rssi_dBm,seq\n';
+  const rows = db[id].map(r=>
+    `${new Date(r.ts).toISOString()},${r.lat},${r.lon},${r.mode},${r.Hs??''},${r.rssi},${r.seq}`
+  ).join('\n');
+  const blob=new Blob([header+rows],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`buoy_${id}_telemetry.csv`; a.click();
+}
+
+// ─── SELECTION ───────────────────────────────────────────────────
+function selectBuoy(id) {
+  selectedBuoy=id;
+  document.querySelectorAll('.buoy-card').forEach(c=>c.classList.remove('selected'));
+  const card=document.getElementById('card-'+id); if(card) card.classList.add('selected');
+  renderDetail(id);
+  showTab('detail');
+  if(markers[id]) map.setView([buoys[id].lat,buoys[id].lon],9,{animate:true});
+  document.getElementById('cmdTarget').value=id;
+}
+
+function showTab(name) {
+  // Works for any number of tabs — matches tab buttons by their onclick attribute
+  document.querySelectorAll('.tab').forEach(t => {
+    const m = t.getAttribute('onclick')?.match(/showTab\('(\w+)'\)/);
+    if (m) t.classList.toggle('active', m[1] === name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(p =>
+    p.classList.toggle('active', p.id === 'tab-' + name)
+  );
+}
+
+// ─── TOP BAR ─────────────────────────────────────────────────────
+function updateTopBar() {
+  const all=Object.values(buoys);
+  const active=all.filter(b=>b.mode==='02').length;
+  const Hs_valid=all.filter(b=>b.Hs!==null).map(b=>b.Hs);
+  const avgHs=Hs_valid.length?(Hs_valid.reduce((s,v)=>s+v,0)/Hs_valid.length).toFixed(2):'—';
+  document.getElementById('topActive').textContent=active;
+  document.getElementById('topTotal').textContent=all.length;
+  document.getElementById('topAvgHs').textContent=avgHs;
+  document.getElementById('utcClock').textContent=
+    new Date().toUTCString().replace('GMT','UTC').slice(0,-4);
+}
+
+function populateDropdowns() {
+  // Only update the option lists — event listener is attached once in boot sequence
+  ['cmdTarget','historyBuoySelect'].forEach(selId => {
+    const sel = document.getElementById(selId);
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— Select buoy —</option>';
+    Object.keys(buoys).sort().forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = 'Buoy ' + id + ' (' + MODE_NAMES[buoys[id].mode] + ')';
+      sel.appendChild(opt);
+    });
+    if (cur) sel.value = cur;
+  });
+}
+
+// ─── COMMAND ─────────────────────────────────────────────────────
+function selectCmd(el,mode) {
+  document.querySelectorAll('.mode-opt').forEach(e=>e.classList.remove('chosen'));
+  el.classList.add('chosen'); selectedCmdMode=mode;
+  document.getElementById('btnSendCmd').disabled=!document.getElementById('cmdTarget').value;
+}
+
+async function sendIridiumCommand() {
+  const target = document.getElementById('cmdTarget').value;
+  if (!target || !selectedCmdMode) return;
+
+  cmdLog(`Queuing MT: Buoy ${target} → SET_MODE=${selectedCmdMode} (${MODE_NAMES[selectedCmdMode]})`, 'tx');
+
+  try {
+    const response = await fetch('http://127.0.0.1:5000/api/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        node_id: target,
+        command: 'SET_MODE',
+        param:   selectedCmdMode
+      })
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      cmdLog(`Backend: ${result.message}`, 'rx');
+      // Optimistically update the local mode so the UI reflects the intent
+      if (buoys[target]) {
+        buoys[target].mode = selectedCmdMode;
+        renderFleetCards();
+        updateMarkers();
+        updateTopBar();
+      }
+    } else {
+      cmdLog(`Error: ${result.message}`, 'err');
+    }
+  } catch (err) {
+    cmdLog('Could not reach backend — is Python running?', 'err');
+  }
+}
+
+function cmdLog(msg,cls){
+  const log=document.getElementById('cmdLog');
+  const line=document.createElement('div');
+  const ts=new Date().toTimeString().slice(0,8);
+  line.className='log-'+(cls||'sys'); line.textContent='['+ts+'] '+msg;
+  log.appendChild(line); log.scrollTop=log.scrollHeight;
+}
+
+// ─── SIMULATED LIVE UPDATES ───────────────────────────────────────
+function simulateTelemetryUpdate() {
+  Object.values(buoys).forEach(b=>{
+    if(b.mode==='02'){
+      b.lat+=+(((Math.random()-0.5)*0.005).toFixed(5));
+      b.lon+=+(((Math.random()-0.5)*0.005).toFixed(5));
+      if(b.Hs) b.Hs=parseFloat(Math.max(0.5,b.Hs+(Math.random()-0.5)*0.08).toFixed(2));
+      b.lastSeen=Date.now();
+      // Push new record to database
+      db[b.id].push({
+        ts:Date.now(), lat:b.lat, lon:b.lon, mode:b.mode,
+        Hs:b.Hs, rssi:b.loraRSSI,
+        seq:db[b.id].length
+      });
+    }
+  });
+  renderFleetCards(); updateMarkers(); updateTopBar();
+  if(driftVisible) toggleDriftLines();
+  document.getElementById('refreshInfo').textContent=
+    'Last update: '+new Date().toTimeString().slice(0,8)+' UTC';
+}
+
+function openBleModal()  { showTab('hc05'); }   // legacy redirect — BLE is now HC-05 tab
+function closeBleModal() { /* no-op */ }
+
+// ── HC-05 button enable/disable (driven by bridge_status events) ─────────────
+function setHcButtonsEnabled(on) {
+  ['btnHcStatus','btnHcSD','btnHcBtOff','btnHcLive','btnHcStop',
+   'btnHcLora','btnHcLoraSend','btnHcSendMode'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !on;
+  });
+  const dot = document.getElementById('hc05Dot');
+  const lbl = document.getElementById('hc05Status');
+  if (dot) {
+    dot.style.background = on ? 'var(--ok)' : 'rgba(255,255,255,0.15)';
+    dot.style.boxShadow  = on ? '0 0 8px var(--ok)' : 'none';
+  }
+}
+
+// ── Send a command to the ESP via the Python serial bridge ───────────────────
+// socket.emit('send_command') → Python writes cmd+\n to the HC-05 COM port
+// The ESP's loop() reads it and calls handleCommand().
+function serialSend(cmd) {
+  if (!socket || !socket.connected) {
+    hc05Log('Bridge not connected — cannot send command', 'err');
+    return;
+  }
+  socket.emit('send_command', { cmd: cmd });
+  hc05Log('→ ' + cmd, 'tx');
+}
+
+// ── IMU stream controls ───────────────────────────────────────────────────────
+let imuFrames = 0;
+function hcStartLive() {
+  imuFrames = 0;
+  document.getElementById('hcImuDisplay').style.display = 'block';
+  serialSend('GET_LIVE');
+}
+function hcStopLive() {
+  serialSend('STOP');
+  document.getElementById('hcImuDisplay').style.display = 'none';
+}
+
+// ── LoRa test ─────────────────────────────────────────────────────────────────
+function hcSendLora() {
+  const content = (document.getElementById('hcLoraInput')?.value || '').trim();
+  document.getElementById('hcLoraResult').style.display = 'block';
+  serialSend(content ? 'LORA_SEND:' + content : 'LORA_TEST');
+}
+
+// ── Mode selector ─────────────────────────────────────────────────────────────
+let selectedHcMode = null;
+function selectHcMode(el, modeNum) {
+  [1,2,3].forEach(n => document.getElementById('hcModeOpt'+n).classList.remove('chosen'));
+  el.classList.add('chosen');
+  selectedHcMode = modeNum;
+  document.getElementById('btnHcSendMode').disabled = false;
+}
+function hcSendMode() {
+  if (!selectedHcMode) return;
+  serialSend('SET_MODE:' + selectedHcMode);
+}
+
+// ── Parse a structured JSON message from the ESP ──────────────────────────────
+// Called both from the bt_message socket event and (kept for compatibility) from
+// any BLE characteristic notification handler that may still be wired up.
+function parseBleMessage(raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (e) {
+    hc05Log('← ' + raw, 'rx'); return;
+  }
+  const t = parsed.type;
+
+  if (t === 'status') {
+    hc05Log('← status: Node ' + (parsed.node_id ?? parsed.nodeID ?? '?') + ' | Mode ' + parsed.mode +
+            ' | GPS ' + (parsed.gpsFix ? 'OK' : 'NO') +
+            ' | LoRa ' + (parsed.loraOK ? 'OK' : 'FAIL'), 'rx');
+    renderHcSnapshot(parsed);
+    // Sync fleet display with confirmed buoy state
+    const id = String(parsed.nodeID || parsed.node_id || '').padStart(2, '0');
+    if (id && buoys[id]) {
+      buoys[id].mode     = String(parsed.mode).padStart(2, '0');
+      buoys[id].gpsFix   = parsed.gpsFix;
+      buoys[id].loraRSSI = parsed.loraRSSI ?? parsed.rssi ?? buoys[id].loraRSSI;
+      if (parsed.lat) { buoys[id].lat = parsed.lat; buoys[id].lon = parsed.lon; }
+      buoys[id].lastSeen = Date.now();
+      renderFleetCards(); updateMarkers(); updateTopBar();
+    }
+    // Show mode panel and highlight current mode
+    document.getElementById('hcModePanel').style.display = 'block';
+    [1,2,3].forEach(n => document.getElementById('hcModeOpt'+n).classList.remove('chosen'));
+    const curEl = document.getElementById('hcModeOpt' + parseInt(parsed.mode));
+    if (curEl) curEl.classList.add('chosen');
+  }
+  else if (t === 'imu') {
+    imuFrames++;
+    document.getElementById('imu-ax').textContent = parsed.ax.toFixed(3);
+    document.getElementById('imu-ay').textContent = parsed.ay.toFixed(3);
+    document.getElementById('imu-az').textContent = parsed.az.toFixed(3);
+    document.getElementById('imu-gx').textContent = parsed.gx.toFixed(2);
+    document.getElementById('imu-gy').textContent = parsed.gy.toFixed(2);
+    document.getElementById('imu-gz').textContent = parsed.gz.toFixed(2);
+    document.getElementById('imuFrameCount').textContent = '(' + imuFrames + ' frames)';
+    // Show IMU panel if not already visible
+    document.getElementById('hcImuDisplay').style.display = 'block';
+  }
+  else if (t === 'sd_summary') {
+    hc05Log('← SD: Hs=' + parsed.Hs + 'm  Tz=' + parsed.Tz + 's  records=' + parsed.records, 'rx');
+    document.getElementById('hcSDDisplay').style.display = 'block';
+    document.getElementById('sd-hs').textContent   = parsed.Hs   != null ? parsed.Hs.toFixed(2)  : '—';
+    document.getElementById('sd-tz').textContent   = parsed.Tz   != null ? parsed.Tz.toFixed(1)  : '—';
+    document.getElementById('sd-recs').textContent = parsed.records ?? '—';
+    if (parsed.psd) drawBlePSD(parsed.psd);
+  }
+  else if (t === 'lora_test') {
+    const ok = parsed.ack;
+    hc05Log('← LoRa: ' + (ok ? 'PASS' : 'FAIL') +
+            '  RSSI=' + parsed.rssi + ' dBm', ok ? 'rx' : 'err');
+    document.getElementById('hcLoraResult').style.display = 'block';
+    document.getElementById('lora-sent').textContent = parsed.sent ? '✓' : '✗';
+    document.getElementById('lora-ack').textContent  = parsed.ack  ? '✓' : '✗';
+    document.getElementById('lora-ack').style.color  = ok ? 'var(--ok)' : 'var(--danger)';
+    document.getElementById('lora-rssi').textContent = parsed.rssi != null ? parsed.rssi.toFixed(1) + ' dBm' : '—';
+    // document.getElementById('lora-snr').textContent  = parsed.snr  != null ? parsed.snr.toFixed(1)  + ' dB'  : '—';
+  }
+  else if (t === 'ack') {
+    hc05Log('← ACK: ' + parsed.command + ' → ' + parsed.param, 'rx');
+    if (parsed.command === 'SET_MODE' && parsed.param) {
+      const id = Object.keys(buoys)[0];   // if single buoy connected, update it
+      if (id && buoys[id]) {
+        buoys[id].mode = String(parsed.param).padStart(2,'0');
+        renderFleetCards(); updateMarkers(); updateTopBar();
+      }
+    }
+  }
+  else if (t === 'error') {
+    hc05Log('← ERR: ' + parsed.msg, 'err');
+  }
+  else {
+    hc05Log('← ' + raw, 'rx');
+  }
+}
+
+function renderHcSnapshot(d) {
+  document.getElementById('hcSnapshot').style.display = 'block';
+  document.getElementById('bss-id').textContent     = d.nodeID ?? d.node_id ?? '—';
+  document.getElementById('bss-mode').textContent   = MODE_NAMES[String(d.mode).padStart(2,'0')] ?? d.mode;
+  document.getElementById('bss-gps').textContent    = d.gpsFix ? '✓ Fix' : '✗ No fix';
+  document.getElementById('bss-gps').style.color    = d.gpsFix ? 'var(--ok)' : 'var(--warn)';
+  document.getElementById('bss-lat').textContent    = d.lat    != null ? d.lat.toFixed(5)  + '°' : '—';
+  document.getElementById('bss-lon').textContent    = d.lon    != null ? d.lon.toFixed(5)  + '°' : '—';
+  document.getElementById('bss-bat').textContent    = d.battery != null ? d.battery + '%'  : '—';
+  document.getElementById('bss-lora').textContent   = d.loraOK  ? '✓ OK' : '✗ FAIL';
+  document.getElementById('bss-lora').style.color   = d.loraOK  ? 'var(--ok)' : 'var(--danger)';
+  const rssi = d.loraRSSI ?? d.rssi;
+  document.getElementById('bss-rssi').textContent   = rssi != null ? rssi.toFixed(1) + ' dBm' : '—';
+  const up = d.uptime;
+  document.getElementById('bss-uptime').textContent = up != null
+    ? (up >= 3600 ? Math.floor(up/3600) + 'h ' : '') + Math.floor((up%3600)/60) + 'm' : '—';
+}
+
+// ── HC-05 tab log helper ──────────────────────────────────────────────────────
+function hc05Log(msg, cls) {
+  const log  = document.getElementById('hc05Log');
+  if (!log) return;
+  const line = document.createElement('div');
+  const ts   = new Date().toTimeString().slice(0, 8);
+  line.className   = 'log-' + (cls || 'sys');
+  line.textContent = '[' + ts + '] ' + msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+  while (log.children.length > 300) log.removeChild(log.firstChild);
+}
+
+// Keep bleLog as alias so any remaining callers don't crash
+function bleLog(msg, cls) { hc05Log(msg, cls); }
+
+// ─── ADD BUOY LOGIC ──────────────────────────────────────────────
+function openAddBuoyModal() { document.getElementById('addBuoyModal').classList.add('show'); }
+function closeAddBuoyModal() { document.getElementById('addBuoyModal').classList.remove('show'); }
+
+async function submitNewBuoy() {
+  const idInput = document.getElementById('newBuoyId').value.trim();
+  const id      = idInput.padStart(2, '0');
+  const mode    = document.getElementById('newBuoyMode').value;
+
+  if (!idInput)  return alert('Please enter a Node ID');
+  if (buoys[id]) return alert('Buoy ID ' + id + ' already exists!');
+
+  // Register with backend first — only add to local state on success
+  // to prevent phantom buoys appearing if the server is unreachable.
+  try {
+    const response = await fetch('http://127.0.0.1:5000/api/buoys/add', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, mode })
+    });
+    const result = await response.json();
+
+    if (response.ok) {
+      // Backend confirmed — now safe to add to local state
+      buoys[id] = {
+        id, mode,
+        lat: -62.5, lon: -58.8,
+        gpsFix: false, loraRSSI: null,
+        Hs: null, psd: null,
+        lastSeen: Date.now()
+      };
+      db[id] = [];
+      closeAddBuoyModal();
+      renderFleetCards(); updateMarkers(); updateTopBar(); populateDropdowns();
+      cmdLog('Buoy ' + id + ' registered: ' + result.message, 'rx');
+    } else {
+      cmdLog('Backend error: ' + result.message, 'err');
+    }
+  } catch (err) {
+    cmdLog('Cannot reach backend — is Python running? Buoy NOT registered.', 'err');
+  }
+}
+
+// ─── SOCKET.IO BRIDGE ────────────────────────────────────────────
+// Connects to the Python Flask-SocketIO server running on port 5000.
+// Receives HC-05 serial data forwarded by the bridge thread in app.py.
+
+const socket = io('http://127.0.0.1:5000', { transports: ['websocket', 'polling'] });
+
+socket.on('connect', () => {
+  bridgeSetStatus(true, 'Socket connected — waiting for serial…');
+  cmdLog('[bridge] Socket.IO connected to Python bridge', 'rx');
+});
+
+socket.on('disconnect', () => {
+  bridgeSetStatus(false, 'Socket disconnected');
+  cmdLog('[bridge] Socket.IO disconnected', 'err');
+});
+
+socket.on('bridge_status', data => {
+  if (data.connected) {
+    bridgeSetStatus(true, 'HC-05 on ' + data.port);
+    cmdLog('[bridge] Serial port open: ' + data.port, 'rx');
+  } else {
+    const msg = data.error ? data.port + ' — ' + data.error : 'Serial disconnected';
+    bridgeSetStatus(false, msg);
+    cmdLog('[bridge] Serial error: ' + (data.error || 'disconnected'), 'err');
+  }
+});
+
+socket.on('bt_message', data => {
+  const raw    = data.message;
+  const parsed = data.parsed;
+
+  // Show in the live feed log in the Command tab
+  bridgeLogLine(raw, parsed ? 'rx' : 'sys');
+
+  if (!parsed) return;
+
+  // ── Route typed response packets to the HC-05 tab panels ─────────────────
+  // STATUS, IMU, LORA_TEST, SD_SUMMARY, ACK, ERROR all come back as
+  // {"type":"...", ...}  and are displayed in the HC-05 sidebar tab.
+  if (parsed.type) {
+    parseBleMessage(raw);   // parseBleMessage now handles HC-05 display
+  }
+
+  // ── Update fleet buoy state if the packet carries a node_id ──────────────
+  const rawId = parsed.node_id ?? parsed.nodeID;
+  if (rawId == null) return;
+
+  const id = String(rawId).padStart(2, '0');
+
+  if (!buoys[id]) {
+    buoys[id] = {
+      id, mode: String(parsed.mode || '01').padStart(2, '0'),
+      lat: parsed.lat ?? -62.5, lon: parsed.lon ?? -58.8,
+      gpsFix: parsed.gpsFix ?? (parsed.lat != null),
+      loraRSSI: parsed.rssi ?? parsed.loraRSSI ?? null,
+      Hs: parsed.Hs ?? null, psd: null,
+      lastSeen: Date.now()
+    };
+    if (!db[id]) db[id] = [];
+    populateDropdowns();
+    cmdLog('[bridge] New buoy detected: ' + id, 'rx');
+  }
+
+  const b = buoys[id];
+  if (parsed.lat  != null) b.lat      = parsed.lat;
+  if (parsed.lon  != null) b.lon      = parsed.lon;
+  if (parsed.Hs   != null) b.Hs       = parsed.Hs;
+  if (parsed.rssi != null) b.loraRSSI = parsed.rssi;
+  if (parsed.loraRSSI != null) b.loraRSSI = parsed.loraRSSI;
+  if (parsed.mode != null) b.mode     = String(parsed.mode).padStart(2, '0');
+  if (parsed.gpsFix != null) b.gpsFix = parsed.gpsFix;
+  else if (parsed.lat != null) b.gpsFix = true;
+  b.lastSeen = Date.now();
+
+  db[id].push({
+    ts: Date.now(), lat: b.lat, lon: b.lon,
+    mode: b.mode, Hs: b.Hs,
+    rssi: b.loraRSSI,
+    seq: db[id].length
+  });
+
+  renderFleetCards();
+  updateMarkers();
+  updateTopBar();
+  if (driftVisible) drawDriftLines();
+  if (selectedBuoy === id) renderDetail(id);
+});
+
+// ── Bridge UI helpers ─────────────────────────────────────────────
+function bridgeSetStatus(ok, label) {
+  // Topbar pill
+  const dot  = document.getElementById('bridgeDot');
+  const lbl  = document.getElementById('bridgeLabel');
+  // Cmd tab row
+  const cdot = document.getElementById('bridgeCmdDot');
+  const clbl = document.getElementById('bridgeCmdLabel');
+  // HC-05 tab banner
+  const hdot = document.getElementById('hc05Dot');
+  const hlbl = document.getElementById('hc05Status');
+
+  const color  = ok ? 'var(--ok)' : 'var(--danger)';
+  const shadow = ok ? '0 0 7px var(--ok)' : 'none';
+
+  [dot, cdot, hdot].forEach(d => {
+    if (d) { d.style.background = color; d.style.boxShadow = shadow; }
+  });
+  if (lbl)  lbl.textContent  = 'BRIDGE ' + label;
+  if (clbl) clbl.textContent = label;
+  if (hlbl) hlbl.textContent = ok ? 'HC-05 connected — ' + label : label;
+
+  // Enable/disable HC-05 action buttons based on serial bridge state
+  setHcButtonsEnabled(ok);
+}
+
+function bridgeLogLine(msg, cls) {
+  const log  = document.getElementById('bridgeLog');
+  if (!log) return;
+  const line = document.createElement('div');
+  const ts   = new Date().toTimeString().slice(0, 8);
+  line.style.color = cls === 'rx'  ? 'var(--ok)'     :
+                     cls === 'err' ? 'var(--danger)'  : 'var(--dim)';
+  line.textContent = '[' + ts + '] ' + msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+  // Keep at most 200 lines to avoid memory growth during long sessions
+  while (log.children.length > 200) log.removeChild(log.firstChild);
+}
+
+window.addEventListener('load', () => {
+  initMap();
+
+  // Attach the cmdTarget change listener exactly once.
+  // populateDropdowns() rebuilds option lists only and must NOT re-attach this.
+  document.getElementById('cmdTarget').addEventListener('change', () => {
+    document.getElementById('btnSendCmd').disabled =
+      !document.getElementById('cmdTarget').value || !selectedCmdMode;
+  });
+
+  // Initial data load. Render functions are called inside each fetch callback
+  // so the UI only draws after real data has arrived, preventing blank flicker.
+  fetchFleetData();
+  fetchFleetHistory();
+
+  // Fleet status: poll every 10 s (lightweight — only latest row per buoy)
+  // History:      poll every 60 s (heavier — matches  Iridium cadence)
+  setInterval(fetchFleetData,    10000);
+  setInterval(fetchFleetHistory, 60000);
+
+  // UTC clock ticks every second, independent of data polling
+  setInterval(() => {
+    document.getElementById('utcClock').textContent =
+      new Date().toUTCString().replace('GMT', 'UTC').slice(0, -4);
+  }, 1000);
+});
+</script>
+</body>
+</html>

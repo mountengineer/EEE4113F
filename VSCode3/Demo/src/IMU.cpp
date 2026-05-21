@@ -107,6 +107,7 @@ bool readFifo(LSM6DS3 &myIMU, uint16_t &data_index, float* ax, float* ay, float*
     }
     data_index += sample_sets;
     // Serial.print("Remainder: "); Serial.println(fifoCount % AXES);
+    hasNewBT = true;
     return data_index >= UNLOADS_PER_DEC * FIFO_THRESHOLD / AXES;
 }
 
@@ -187,6 +188,8 @@ void updateIMU(LSM6DS3 &myIMU, uint16_t sample_freq_hz, uint16_t full_scale) {
     // full_scale must be in: 0, 1, 2, 3
     // Won't error if not, but won't work as expected
     uint8_t hz = 0;
+    
+
     bool max_gyro = false;
     switch (sample_freq_hz) {
         case 0: 
@@ -228,6 +231,7 @@ void updateIMU(LSM6DS3 &myIMU, uint16_t sample_freq_hz, uint16_t full_scale) {
             hz = 0;
             break;
     }
+    full_scale = 0b00000000;
 
     uint8_t acc_ctrl = ((hz & 0x0F) << 4) | ((full_scale & 0x03) << 2) | 0x03; // 0x03 sets filter to 50Hz
     if (max_gyro) {
@@ -235,6 +239,22 @@ void updateIMU(LSM6DS3 &myIMU, uint16_t sample_freq_hz, uint16_t full_scale) {
     }
     uint8_t gyr_ctrl = ((hz & 0x0F) << 4) | ((full_scale & 0x03) << 2);
 
+    uint8_t read;
+    myIMU.readRegister(&read, LSM6DS3_ACC_GYRO_FIFO_CTRL5);
+    read &= (hz & 0x0F) << 3;
+    myIMU.writeRegister(LSM6DS3_ACC_GYRO_FIFO_CTRL5, read);
     myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, acc_ctrl);
     myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL2_G, gyr_ctrl);
+}
+
+void updateBT(LSM6DS3 &myIMu, BuoyState &state, uint16_t data_index, float *gx, float *gy, float *gz, float *ax, float *ay, float *az) {
+    uint16_t index = max(0, data_index-1);
+    state.gx = gx[index];
+    state.gy = gy[index];
+    state.gz = gz[index];
+    state.ax = ax[index];
+    state.ay = ay[index];
+    state.az = az[index];
+    Serial.print("Updated az: "); Serial.println(state.az);
+    GPStoBT();
 }

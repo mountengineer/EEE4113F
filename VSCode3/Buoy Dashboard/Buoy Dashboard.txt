@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Antarctic Buoy Array — Mission Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{
+  --deep:#060E1A;--panel:#0A1628;--border:rgba(0,200,255,0.15);
+  --signal:#00C8FF;--ok:#00E5A0;--warn:#FFB020;--danger:#FF4560;
+  --dim:rgba(255,255,255,0.35);--text:#E8F4FF;
+  --mono:'Courier New',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--deep);color:var(--text);font-family:'Segoe UI',sans-serif;
+  height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── TOP BAR ── */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 20px;border-bottom:1px solid var(--border);
+  background:var(--panel);flex-shrink:0;
+}
+.topbar-left{display:flex;align-items:center;gap:14px;}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);
+  box-shadow:0 0 8px var(--ok);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.title{font-size:13px;font-weight:600;letter-spacing:0.1em;color:var(--signal);text-transform:uppercase;}
+.subtitle{font-size:10px;color:var(--dim);margin-top:1px;}
+.topbar-right{display:flex;align-items:center;gap:16px;}
+.stat-chip{text-align:center;}
+.stat-chip .val{font-family:var(--mono);font-size:18px;font-weight:bold;color:var(--signal);}
+.stat-chip .lbl{font-size:9px;color:var(--dim);letter-spacing:0.1em;text-transform:uppercase;}
+.utc{font-family:var(--mono);font-size:11px;color:var(--dim);}
+
+/* ── LAYOUT ── */
+.body{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:320px;background:var(--panel);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;}
+.map-area{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+#map{flex:1;}
+
+/* ── SIDEBAR ── */
+.sidebar-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;}
+.tab{flex:1;padding:10px;text-align:center;font-size:11px;letter-spacing:0.08em;
+  text-transform:uppercase;cursor:pointer;color:var(--dim);
+  border-bottom:2px solid transparent;transition:all 0.15s;}
+.tab.active{color:var(--signal);border-bottom-color:var(--signal);}
+.tab-pane{display:none;flex:1;overflow-y:auto;padding:12px;}
+.tab-pane.active{display:block;}
+
+/* ── BUOY CARDS ── */
+.buoy-card{
+  background:rgba(0,200,255,0.04);border:1px solid var(--border);
+  border-radius:6px;padding:12px;margin-bottom:10px;cursor:pointer;
+  transition:border-color 0.15s;
+}
+.buoy-card:hover,.buoy-card.selected{border-color:var(--signal);}
+.buoy-card.selected{background:rgba(0,200,255,0.08);}
+.bc-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.bc-id{font-family:var(--mono);font-size:13px;font-weight:bold;color:var(--signal);}
+.mode-badge{font-size:9px;padding:2px 8px;border-radius:10px;letter-spacing:0.06em;
+  text-transform:uppercase;font-family:var(--mono);}
+.mode-cal{background:rgba(255,176,32,0.15);color:var(--warn);border:1px solid rgba(255,176,32,0.3);}
+.mode-active{background:rgba(0,229,160,0.15);color:var(--ok);border:1px solid rgba(0,229,160,0.3);}
+.mode-sleep{background:rgba(255,255,255,0.05);color:var(--dim);border:1px solid rgba(255,255,255,0.1);}
+.bc-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.bc-stat .lbl{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em;}
+.bc-stat .val{font-family:var(--mono);font-size:12px;margin-top:1px;}
+.bc-stat .val.ok{color:var(--ok);}
+.bc-stat .val.warn{color:var(--warn);}
+.bc-stat .val.dim{color:var(--dim);}
+.bc-footer{margin-top:8px;font-size:10px;color:var(--dim);display:flex;justify-content:space-between;}
+
+/* ── DETAIL PANEL ── */
+.detail-section{margin-bottom:16px;}
+.detail-title{font-size:10px;letter-spacing:0.12em;text-transform:uppercase;
+  color:var(--signal);margin-bottom:8px;padding-bottom:4px;
+  border-bottom:1px solid var(--border);}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.dstat{background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:4px;padding:8px 10px;}
+.dstat .lbl{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em;}
+.dstat .val{font-family:var(--mono);font-size:14px;margin-top:3px;}
+.dstat.full{grid-column:1/-1;}
+
+/* ── PSD CHART ── */
+.psd-container{background:rgba(0,0,0,0.4);border:1px solid var(--border);
+  border-radius:4px;padding:8px;margin-top:4px;}
+canvas{width:100%!important;height:80px!important;}
+
+/* ── COMMAND PANEL ── */
+.cmd-section{background:rgba(0,0,0,0.2);border:1px solid var(--border);
+  border-radius:6px;padding:12px;margin-bottom:10px;}
+.cmd-title{font-size:10px;color:var(--signal);letter-spacing:0.1em;
+  text-transform:uppercase;margin-bottom:10px;}
+.mode-select{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;}
+.mode-opt{padding:8px 4px;border:1px solid rgba(255,255,255,0.1);border-radius:4px;
+  text-align:center;cursor:pointer;font-size:10px;color:var(--dim);
+  font-family:var(--mono);letter-spacing:0.06em;transition:all 0.15s;text-transform:uppercase;}
+.mode-opt:hover{border-color:rgba(0,200,255,0.4);color:var(--signal);}
+.mode-opt.chosen{border-color:var(--signal);color:var(--signal);
+  background:rgba(0,200,255,0.08);}
+.btn-cmd{width:100%;padding:10px;background:rgba(0,229,160,0.08);
+  border:1px solid var(--ok);border-radius:4px;color:var(--ok);
+  font-family:var(--mono);font-size:11px;letter-spacing:0.08em;
+  text-transform:uppercase;cursor:pointer;transition:all 0.15s;}
+.btn-cmd:hover:not(:disabled){background:rgba(0,229,160,0.15);
+  box-shadow:0 0 10px rgba(0,229,160,0.1);}
+.btn-cmd:disabled{opacity:0.3;cursor:not-allowed;}
+.btn-ble{background:rgba(0,200,255,0.08);border-color:var(--signal);color:var(--signal);}
+.btn-ble:hover:not(:disabled){background:rgba(0,200,255,0.15)!important;}
+.cmd-log{background:#000;border-radius:4px;padding:8px;height:80px;
+  overflow-y:auto;font-family:var(--mono);font-size:10px;margin-top:8px;}
+.log-tx{color:rgba(0,200,255,0.7);}
+.log-rx{color:var(--ok);}
+.log-sys{color:var(--dim);}
+.log-err{color:var(--danger);}
+
+/* ── MAP STYLES ── */
+#map{background:#0A1525;}
+.leaflet-container{background:#0A1525;}
+.buoy-marker{
+  width:36px;height:36px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:11px;font-weight:bold;
+  border:2px solid;cursor:pointer;
+  box-shadow:0 0 12px rgba(0,0,0,0.5);
+}
+.marker-active{background:rgba(0,229,160,0.2);border-color:var(--ok);color:var(--ok);}
+.marker-sleep{background:rgba(100,100,100,0.2);border-color:rgba(150,150,150,0.5);color:var(--dim);}
+.marker-cal{background:rgba(255,176,32,0.2);border-color:var(--warn);color:var(--warn);}
+.leaflet-popup-content-wrapper{background:var(--panel);border:1px solid var(--border);
+  border-radius:6px;color:var(--text);box-shadow:0 4px 20px rgba(0,0,0,0.5);}
+.leaflet-popup-tip{background:var(--panel);}
+.popup-inner{padding:2px;min-width:180px;}
+.popup-title{font-family:var(--mono);font-size:12px;color:var(--signal);margin-bottom:6px;}
+.popup-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;}
+.popup-row .k{color:var(--dim);}
+.popup-row .v{font-family:var(--mono);}
+
+/* ── MAP BOTTOM BAR ── */
+.map-bottom{padding:8px 14px;background:var(--panel);border-top:1px solid var(--border);
+  display:flex;align-items:center;gap:20px;flex-shrink:0;}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--dim);}
+.legend-dot{width:8px;height:8px;border-radius:50%;}
+.refresh-info{margin-left:auto;font-size:10px;color:var(--dim);font-family:var(--mono);}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(0,200,255,0.2);border-radius:2px;}
+
+/* ── BLE MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);
+  z-index:1000;display:flex;align-items:center;justify-content:center;display:none;}
+.modal-overlay.show{display:flex;}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:8px;
+  padding:24px;width:360px;max-width:90vw;}
+.modal-title{font-family:var(--mono);font-size:13px;color:var(--signal);
+  text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px;}
+.modal-sub{font-size:11px;color:var(--dim);margin-bottom:16px;line-height:1.6;}
+.ble-status{padding:8px 12px;background:rgba(0,0,0,0.3);border-radius:4px;
+  font-family:var(--mono);font-size:11px;margin-bottom:10px;min-height:32px;}
+.modal-btns{display:flex;gap:8px;}
+.btn-modal{flex:1;padding:10px;border-radius:4px;border:1px solid;
+  font-family:var(--mono);font-size:11px;letter-spacing:0.08em;
+  text-transform:uppercase;cursor:pointer;transition:all 0.15s;}
+.btn-connect-ble{background:rgba(0,200,255,0.08);border-color:var(--signal);
+  color:var(--signal);}
+.btn-connect-ble:hover{background:rgba(0,200,255,0.18);}
+.btn-close-modal{background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.15);color:var(--dim);}
+.btn-close-modal:hover{border-color:rgba(255,255,255,0.3);color:var(--text);}
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="pulse"></div>
+    <div>
+      <div class="title">Antarctic Buoy Array — Mission Control</div>
+      <div class="subtitle">Communications Subsystem Dashboard — EEE4113F</div>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="stat-chip">
+      <div class="val" id="topActive">0</div>
+      <div class="lbl">Active</div>
+    </div>
+    <div class="stat-chip">
+      <div class="val" id="topTotal">0</div>
+      <div class="lbl">Total</div>
+    </div>
+    <div class="stat-chip">
+      <div class="val" id="topAvgBatt">—</div>
+      <div class="lbl">Avg Batt</div>
+    </div>
+    <div class="utc" id="utcClock">—</div>
+  </div>
+</div>
+
+<!-- BODY -->
+<div class="body">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-tabs">
+      <div class="tab active" onclick="showTab('fleet')">Fleet</div>
+      <div class="tab" onclick="showTab('detail')">Detail</div>
+      <div class="tab" onclick="showTab('command')">Command</div>
+    </div>
+
+    <!-- FLEET TAB -->
+    <div class="tab-pane active" id="tab-fleet">
+      <div id="buoyCardContainer"></div>
+    </div>
+
+    <!-- DETAIL TAB -->
+    <div class="tab-pane" id="tab-detail">
+      <div id="detailContent">
+        <p style="color:var(--dim);font-size:12px;padding:10px 0;">Select a buoy from the Fleet tab or map to view detail.</p>
+      </div>
+    </div>
+
+    <!-- COMMAND TAB -->
+    <div class="tab-pane" id="tab-command">
+      <div class="cmd-section">
+        <div class="cmd-title">Target Buoy</div>
+        <select id="cmdTarget" style="width:100%;padding:8px;background:rgba(0,0,0,0.3);
+          border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;
+          font-family:var(--mono);">
+          <option value="">— Select buoy —</option>
+        </select>
+      </div>
+
+      <div class="cmd-section">
+        <div class="cmd-title">Operating Mode</div>
+        <div class="mode-select">
+          <div class="mode-opt" onclick="selectCmd(this,'01')">Calibration<br><span style="font-size:8px;opacity:0.5">0x01</span></div>
+          <div class="mode-opt" onclick="selectCmd(this,'02')">Active<br><span style="font-size:8px;opacity:0.5">0x02</span></div>
+          <div class="mode-opt" onclick="selectCmd(this,'03')">Low Power<br><span style="font-size:8px;opacity:0.5">0x03</span></div>
+        </div>
+        <button class="btn-cmd" id="btnSendCmd" onclick="sendIridiumCommand()" disabled>
+          ↑ &nbsp; Queue Iridium MT Command
+        </button>
+      </div>
+
+      <div class="cmd-section">
+        <div class="cmd-title">Bluetooth (Ship-Side Config)</div>
+        <p style="font-size:10px;color:var(--dim);margin-bottom:8px;line-height:1.6;">
+          Connect directly to a buoy via BLE while on the deployment vessel. Works without internet.
+        </p>
+        <button class="btn-cmd btn-ble" onclick="openBleModal()">
+          ⬡ &nbsp; Open BLE Config Interface
+        </button>
+      </div>
+
+      <div class="cmd-section">
+        <div class="cmd-title">Command Log</div>
+        <div class="cmd-log" id="cmdLog"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAP -->
+  <div class="map-area">
+    <div id="map"></div>
+    <div class="map-bottom">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--ok)"></div>Active sensing</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--warn)"></div>Calibration</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--dim)"></div>Low power / sleep</div>
+      <div class="refresh-info" id="refreshInfo">Mock data — connect Iridium backend for live data</div>
+    </div>
+  </div>
+</div>
+
+<!-- BLE MODAL -->
+<div class="modal-overlay" id="bleModal">
+  <div class="modal">
+    <div class="modal-title">Bluetooth Configuration</div>
+    <div class="modal-sub">
+      Connects directly to buoy HC-08 via Chrome Web Bluetooth.<br>
+      <strong>No internet required</strong> — works offline on ship.<br>
+      Requires Chrome on Android or desktop (not Safari/Firefox).
+    </div>
+    <div class="ble-status" id="bleModalStatus">Not connected</div>
+    <div class="modal-btns">
+      <button class="btn-modal btn-connect-ble" id="btnBleConnect" onclick="bleConnect()">⬡ Scan &amp; Connect</button>
+      <button class="btn-modal btn-close-modal" onclick="closeBleModal()">Close</button>
+    </div>
+    <div class="cmd-log" id="bleLog" style="margin-top:10px;height:100px;"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  MOCK BUOY DATA
+//  In production: replace initBuoys() with a fetch() call to your
+//  backend API endpoint that returns real Iridium SBD telemetry.
+//  See BACKEND INTEGRATION section at the bottom of this script.
+// ═══════════════════════════════════════════════════════════════
+
+const MODE_NAMES = { '01':'Calibration', '02':'Active Sensing', '03':'Low Power' };
+const MODE_CSS   = { '01':'mode-cal', '02':'mode-active', '03':'mode-sleep' };
+const MARKER_CSS = { '01':'marker-cal', '02':'marker-active', '03':'marker-sleep' };
+
+let buoys = {};
+let markers = {};
+let selectedBuoy = null;
+let selectedCmdMode = null;
+
+// ─── Mock data representing 4 deployed buoys ────────────────────
+// Coordinates centred around Drake Passage, Southern Ocean
+function initMockBuoys() {
+  const mockData = [
+    {
+      id: '01', mode: '02',
+      lat: -62.4, lon: -58.3,
+      battery: 87.2, gpsFix: true,
+      loraRSSI: -112.3, loraSNR: 4.1,
+      Hs: 3.24,  // significant wave height in metres
+      lastSeen: Date.now() - 180000,   // 3 min ago
+      psd: [0.1,0.3,0.8,1.4,2.1,3.2,2.8,1.9,1.1,0.6,0.3,0.1,0.05,0.03,0.01]
+    },
+    {
+      id: '02', mode: '02',
+      lat: -63.1, lon: -57.1,
+      battery: 72.5, gpsFix: true,
+      loraRSSI: -118.7, loraSNR: 2.3,
+      Hs: 3.87,
+      lastSeen: Date.now() - 420000,
+      psd: [0.1,0.2,0.5,1.1,1.8,2.6,3.1,2.4,1.5,0.8,0.4,0.2,0.08,0.02,0.01]
+    },
+    {
+      id: '03', mode: '03',
+      lat: -61.8, lon: -59.8,
+      battery: 45.1, gpsFix: true,
+      loraRSSI: -124.2, loraSNR: -1.2,
+      Hs: 2.91,
+      lastSeen: Date.now() - 1800000,   // 30 min ago
+      psd: [0.2,0.4,0.7,1.0,1.6,2.0,1.8,1.3,0.9,0.5,0.2,0.1,0.04,0.01,0.005]
+    },
+    {
+      id: '04', mode: '01',
+      lat: -62.9, lon: -60.5,
+      battery: 99.0, gpsFix: false,
+      loraRSSI: -108.5, loraSNR: 6.2,
+      Hs: null,
+      lastSeen: Date.now() - 60000,
+      psd: null
+    }
+  ];
+
+  mockData.forEach(b => { buoys[b.id] = b; });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAP INITIALISATION
+// ═══════════════════════════════════════════════════════════════
+let map;
+
+function initMap() {
+  map = L.map('map', {
+    center: [-62.5, -58.8],
+    zoom: 7,
+    zoomControl: true
+  });
+
+  // Dark ocean tile layer
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO',
+    maxZoom: 18
+  }).addTo(map);
+}
+
+function updateMarkers() {
+  Object.values(buoys).forEach(b => {
+    const markerCss = MARKER_CSS[b.mode] || 'marker-sleep';
+    const html = `<div class="buoy-marker ${markerCss}">${b.id}</div>`;
+    const icon = L.divIcon({ html, className:'', iconSize:[36,36], iconAnchor:[18,18] });
+
+    const ageMins = Math.round((Date.now() - b.lastSeen) / 60000);
+    const popupHtml = `
+      <div class="popup-inner">
+        <div class="popup-title">Buoy ${b.id}</div>
+        <div class="popup-row"><span class="k">Mode</span><span class="v">${MODE_NAMES[b.mode]}</span></div>
+        <div class="popup-row"><span class="k">Battery</span><span class="v">${b.battery.toFixed(1)}%</span></div>
+        <div class="popup-row"><span class="k">GPS Fix</span><span class="v">${b.gpsFix ? 'YES' : 'NO'}</span></div>
+        <div class="popup-row"><span class="k">Hs</span><span class="v">${b.Hs ? b.Hs.toFixed(2)+' m' : '—'}</span></div>
+        <div class="popup-row"><span class="k">Last seen</span><span class="v">${ageMins}m ago</span></div>
+        <div class="popup-row"><span class="k">RSSI</span><span class="v">${b.loraRSSI.toFixed(1)} dBm</span></div>
+      </div>`;
+
+    if (markers[b.id]) {
+      markers[b.id].setLatLng([b.lat, b.lon]);
+      markers[b.id].setIcon(icon);
+      markers[b.id].setPopupContent(popupHtml);
+    } else {
+      const m = L.marker([b.lat, b.lon], { icon })
+        .addTo(map)
+        .bindPopup(popupHtml);
+      m.on('click', () => selectBuoy(b.id));
+      markers[b.id] = m;
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  FLEET CARDS
+// ═══════════════════════════════════════════════════════════════
+function renderFleetCards() {
+  const container = document.getElementById('buoyCardContainer');
+  container.innerHTML = '';
+  const sorted = Object.values(buoys).sort((a,b) => a.id.localeCompare(b.id));
+  sorted.forEach(b => {
+    const ageSec = Math.round((Date.now() - b.lastSeen) / 1000);
+    const ageStr = ageSec < 60 ? ageSec+'s' : Math.round(ageSec/60)+'m';
+    const battClass = b.battery > 50 ? 'ok' : b.battery > 20 ? 'warn' : 'val';
+    const gpsClass = b.gpsFix ? 'ok' : 'warn';
+    const rssiClass = b.loraRSSI > -120 ? 'ok' : b.loraRSSI > -135 ? 'warn' : 'dim';
+    const card = document.createElement('div');
+    card.className = 'buoy-card' + (selectedBuoy === b.id ? ' selected' : '');
+    card.id = 'card-'+b.id;
+    card.onclick = () => selectBuoy(b.id);
+    card.innerHTML = `
+      <div class="bc-header">
+        <span class="bc-id">BUOY ${b.id}</span>
+        <span class="mode-badge ${MODE_CSS[b.mode]}">${MODE_NAMES[b.mode]}</span>
+      </div>
+      <div class="bc-grid">
+        <div class="bc-stat">
+          <div class="lbl">Battery</div>
+          <div class="val ${battClass}">${b.battery.toFixed(1)}%</div>
+        </div>
+        <div class="bc-stat">
+          <div class="lbl">GPS Fix</div>
+          <div class="val ${gpsClass}">${b.gpsFix ? 'YES' : 'NO FIX'}</div>
+        </div>
+        <div class="bc-stat">
+          <div class="lbl">Hs</div>
+          <div class="val">${b.Hs ? b.Hs.toFixed(2)+' m' : '—'}</div>
+        </div>
+        <div class="bc-stat">
+          <div class="lbl">RSSI</div>
+          <div class="val ${rssiClass}">${b.loraRSSI.toFixed(1)} dBm</div>
+        </div>
+      </div>
+      <div class="bc-footer">
+        <span>(${b.lat.toFixed(3)}, ${b.lon.toFixed(3)})</span>
+        <span>Last: ${ageStr} ago</span>
+      </div>`;
+    container.appendChild(card);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DETAIL PANEL
+// ═══════════════════════════════════════════════════════════════
+function renderDetail(id) {
+  const b = buoys[id];
+  if (!b) return;
+  const ageMins = ((Date.now() - b.lastSeen) / 60000).toFixed(1);
+  const battClass = b.battery > 50 ? 'ok' : b.battery > 20 ? 'warn' : 'dim';
+  document.getElementById('detailContent').innerHTML = `
+    <div class="detail-section">
+      <div class="detail-title">Buoy ${b.id} — ${MODE_NAMES[b.mode]}</div>
+      <div class="detail-grid">
+        <div class="dstat"><div class="lbl">Latitude</div><div class="val">${b.lat.toFixed(5)}°</div></div>
+        <div class="dstat"><div class="lbl">Longitude</div><div class="val">${b.lon.toFixed(5)}°</div></div>
+        <div class="dstat"><div class="lbl">Battery</div><div class="val ${battClass}">${b.battery.toFixed(1)}%</div></div>
+        <div class="dstat"><div class="lbl">GPS Fix</div><div class="val ${b.gpsFix?'ok':'warn'}">${b.gpsFix?'Acquired':'No Fix'}</div></div>
+        <div class="dstat"><div class="lbl">LoRa RSSI</div><div class="val">${b.loraRSSI.toFixed(1)} dBm</div></div>
+        <div class="dstat"><div class="lbl">LoRa SNR</div><div class="val">${b.loraSNR.toFixed(1)} dB</div></div>
+        <div class="dstat full"><div class="lbl">Last received</div><div class="val">${ageMins} minutes ago</div></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-title">Wave Data</div>
+      <div class="detail-grid">
+        <div class="dstat full">
+          <div class="lbl">Significant Wave Height (Hs)</div>
+          <div class="val" style="font-size:22px;color:var(--signal)">${b.Hs ? b.Hs.toFixed(2)+' m' : '— (calibrating)'}</div>
+        </div>
+      </div>
+      ${b.psd ? `
+      <div class="psd-container">
+        <div class="lbl" style="font-size:9px;margin-bottom:4px;">POWER SPECTRAL DENSITY (relative)</div>
+        <canvas id="psdCanvas" width="280" height="80"></canvas>
+      </div>` : '<p style="font-size:11px;color:var(--dim);margin-top:8px;">PSD not yet available</p>'}
+    </div>`;
+
+  if (b.psd) drawPSD(b.psd);
+}
+
+function drawPSD(data) {
+  const canvas = document.getElementById('psdCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  const max = Math.max(...data);
+  const barW = W / data.length;
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(0,200,255,0.8)');
+  grad.addColorStop(1,'rgba(0,200,255,0.1)');
+
+  ctx.fillStyle = grad;
+  data.forEach((v,i) => {
+    const h = (v/max) * (H-4);
+    ctx.fillRect(i*barW+1, H-h, barW-2, h);
+  });
+
+  // Axis line
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.beginPath(); ctx.moveTo(0,H-1); ctx.lineTo(W,H-1); ctx.stroke();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SELECTION & NAVIGATION
+// ═══════════════════════════════════════════════════════════════
+function selectBuoy(id) {
+  selectedBuoy = id;
+  document.querySelectorAll('.buoy-card').forEach(c => c.classList.remove('selected'));
+  const card = document.getElementById('card-'+id);
+  if (card) card.classList.add('selected');
+  renderDetail(id);
+  showTab('detail');
+  if (markers[id]) map.setView([buoys[id].lat, buoys[id].lon], 9, {animate:true});
+
+  // Populate command target
+  const sel = document.getElementById('cmdTarget');
+  sel.value = id;
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['fleet','detail','command'];
+    t.classList.toggle('active', names[i]===name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(p => {
+    p.classList.toggle('active', p.id==='tab-'+name);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  COMMAND (IRIDIUM MT)
+// ═══════════════════════════════════════════════════════════════
+function selectCmd(el, mode) {
+  document.querySelectorAll('.mode-opt').forEach(e => e.classList.remove('chosen'));
+  el.classList.add('chosen');
+  selectedCmdMode = mode;
+  document.getElementById('btnSendCmd').disabled = !document.getElementById('cmdTarget').value;
+}
+
+function sendIridiumCommand() {
+  const target = document.getElementById('cmdTarget').value;
+  if (!target || !selectedCmdMode) return;
+  const modeName = MODE_NAMES[selectedCmdMode];
+  cmdLog(`Queuing MT command → Buoy ${target}: SET_MODE=${selectedCmdMode} (${modeName})`,'tx');
+  cmdLog(`[MOCK] In production: POST to /api/command {buoy:"${target}",mode:"${selectedCmdMode}"}`,'sys');
+  cmdLog(`[MOCK] Backend sends Iridium MT SBD → modem polls → buoy applies mode`,'sys');
+
+  // Simulate confirmation after 3 seconds
+  setTimeout(() => {
+    cmdLog(`[MOCK] MT message queued successfully for buoy ${target}`,'rx');
+    // Update mock state
+    if (buoys[target]) {
+      buoys[target].mode = selectedCmdMode;
+      renderFleetCards();
+      updateMarkers();
+    }
+  }, 3000);
+}
+
+function cmdLog(msg, cls) {
+  const log = document.getElementById('cmdLog');
+  const line = document.createElement('div');
+  const ts = new Date().toTimeString().slice(0,8);
+  line.className = 'log-'+cls;
+  line.textContent = '['+ts+'] '+msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TOP BAR STATS
+// ═══════════════════════════════════════════════════════════════
+function updateTopBar() {
+  const all = Object.values(buoys);
+  const active = all.filter(b => b.mode === '02').length;
+  const avgBatt = all.reduce((s,b) => s+b.battery, 0) / (all.length || 1);
+  document.getElementById('topActive').textContent = active;
+  document.getElementById('topTotal').textContent = all.length;
+  document.getElementById('topAvgBatt').textContent = avgBatt.toFixed(0)+'%';
+  document.getElementById('utcClock').textContent =
+    new Date().toUTCString().replace('GMT','UTC').slice(0,-4);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  COMMAND DROPDOWN POPULATE
+// ═══════════════════════════════════════════════════════════════
+function populateCmdDropdown() {
+  const sel = document.getElementById('cmdTarget');
+  sel.innerHTML = '<option value="">— Select buoy —</option>';
+  Object.keys(buoys).sort().forEach(id => {
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = 'Buoy '+id+' ('+MODE_NAMES[buoys[id].mode]+')';
+    sel.appendChild(opt);
+  });
+  sel.addEventListener('change', () => {
+    document.getElementById('btnSendCmd').disabled = !sel.value || !selectedCmdMode;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BLE MODAL
+// ═══════════════════════════════════════════════════════════════
+let bleDevice = null, bleTxChar = null, bleConnected = false;
+const HC08_SVC  = '0000ffe0-0000-1000-8000-00805f9b34fb';
+const HC08_CHAR = '0000ffe1-0000-1000-8000-00805f9b34fb';
+
+function openBleModal()  { document.getElementById('bleModal').classList.add('show'); }
+function closeBleModal() { document.getElementById('bleModal').classList.remove('show'); }
+
+async function bleConnect() {
+  if (!navigator.bluetooth) {
+    bleLog('Web Bluetooth not available. Use Chrome on Android or desktop.','err');
+    document.getElementById('bleModalStatus').textContent = 'Web Bluetooth not supported in this browser';
+    return;
+  }
+  bleLog('Scanning for HC-08...','sys');
+  try {
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters:[{name:'HC-08'},{namePrefix:'HC-0'},{services:[HC08_SVC]}],
+      optionalServices:[HC08_SVC]
+    });
+    bleDevice.addEventListener('gattserverdisconnected', () => {
+      bleLog('Disconnected','err');
+      document.getElementById('bleModalStatus').textContent = 'Disconnected';
+      bleConnected = false;
+    });
+    const server = await bleDevice.gatt.connect();
+    const svc    = await server.getPrimaryService(HC08_SVC);
+    bleTxChar    = await svc.getCharacteristic(HC08_CHAR);
+    await bleTxChar.startNotifications();
+    bleTxChar.addEventListener('characteristicvaluechanged', e => {
+      const txt = new TextDecoder().decode(new Uint8Array(e.target.value.buffer));
+      bleLog('← '+txt.trim(),'rx');
+      try {
+        const d = JSON.parse(txt);
+        if (d.nodeID) {
+          document.getElementById('bleModalStatus').textContent =
+            'Buoy '+d.nodeID+' | Mode:'+d.mode+' | Batt:'+d.battery.toFixed(1)+'%';
+          // Inject live BLE data into dashboard state
+          const id = String(d.nodeID).padStart(2,'0');
+          if (buoys[id]) {
+            buoys[id].battery = d.battery;
+            buoys[id].mode = String(d.mode).padStart(2,'0');
+            buoys[id].gpsFix = d.gpsFix;
+            buoys[id].loraRSSI = d.loraRSSI || buoys[id].loraRSSI;
+            buoys[id].lastSeen = Date.now();
+            renderFleetCards(); updateMarkers(); updateTopBar();
+          }
+        }
+      } catch(e) {}
+    });
+    bleConnected = true;
+    document.getElementById('bleModalStatus').textContent = 'Connected to '+bleDevice.name;
+    bleLog('Connected to '+bleDevice.name,'rx');
+    // Request status automatically
+    await bleTxChar.writeValue(new TextEncoder().encode('STATUS\n'));
+    bleLog('→ STATUS','tx');
+  } catch(err) {
+    bleLog('Error: '+err.message,'err');
+  }
+}
+
+function bleLog(msg, cls) {
+  const log = document.getElementById('bleLog');
+  const line = document.createElement('div');
+  line.className = 'log-'+(cls||'sys');
+  line.textContent = msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SIMULATE LIVE UPDATES (mock data drift)
+//  In production: replace with fetch('/api/buoys').then(...)
+// ═══════════════════════════════════════════════════════════════
+function simulateLiveUpdate() {
+  Object.values(buoys).forEach(b => {
+    if (b.mode === '02') {
+      b.lat += (Math.random()-0.5)*0.005;
+      b.lon += (Math.random()-0.5)*0.005;
+      b.battery -= 0.01;
+      b.Hs = Math.max(0.5, b.Hs + (Math.random()-0.5)*0.1);
+      b.lastSeen = Date.now();
+    }
+  });
+  renderFleetCards();
+  updateMarkers();
+  updateTopBar();
+  document.getElementById('refreshInfo').textContent =
+    'Mock update: '+new Date().toTimeString().slice(0,8)+' UTC';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BOOT SEQUENCE
+// ═══════════════════════════════════════════════════════════════
+window.addEventListener('load', () => {
+  initMockBuoys();
+  initMap();
+  updateMarkers();
+  renderFleetCards();
+  updateTopBar();
+  populateCmdDropdown();
+  setInterval(() => {
+    document.getElementById('utcClock').textContent =
+      new Date().toUTCString().replace('GMT','UTC').slice(0,-4);
+  }, 1000);
+  // Simulate a telemetry update every 30s for demo purposes
+  setInterval(simulateLiveUpdate, 30000);
+  cmdLog('Dashboard initialised — mock data mode','sys');
+  cmdLog('Replace initMockBuoys() with fetch() for live Iridium data','sys');
+});
+
+/*
+═══════════════════════════════════════════════════════════════
+  BACKEND INTEGRATION GUIDE
+  When Iridium hardware is available, replace mock data:
+
+  1. Set up a simple backend (Node.js example):
+     const express = require('express');
+     const app = express();
+     app.use(express.json());
+     let buoyStore = {};
+
+     // Iridium webhook — configure this URL in your Iridium SBD gateway
+     app.post('/iridium/webhook', (req, res) => {
+       const { imei, data } = req.body;  // binary SBD payload
+       const parsed = parseSBD(data);    // decode your binary struct
+       buoyStore[parsed.nodeID] = { ...parsed, lastSeen: Date.now() };
+       res.sendStatus(200);
+     });
+
+     // Command endpoint — called by dashboard
+     app.post('/api/command', async (req, res) => {
+       const { buoy, mode } = req.body;
+       await queueIridiumMT(buoy, mode);  // use Iridium Direct IP API
+       res.json({ status: 'queued' });
+     });
+
+     // Data endpoint — polled by dashboard
+     app.get('/api/buoys', (req, res) => res.json(buoyStore));
+     app.listen(3000);
+
+  2. In this dashboard, replace initMockBuoys() with:
+     async function loadLiveBuoys() {
+       const data = await fetch('/api/buoys').then(r => r.json());
+       Object.entries(data).forEach(([id, b]) => { buoys[id] = b; });
+       renderFleetCards(); updateMarkers(); updateTopBar();
+     }
+     setInterval(loadLiveBuoys, 60000);  // poll every 60s
+═══════════════════════════════════════════════════════════════
+*/
+</script>
+</body>
+</html>

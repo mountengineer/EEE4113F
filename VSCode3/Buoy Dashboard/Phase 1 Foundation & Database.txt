@@ -1,0 +1,22 @@
+Phase 1: Foundation & Database
+[ Y] Set up a Python Backend: Install a web framework. Flask or FastAPI are excellent, beginner-friendly Python frameworks.
+
+[ Y] Design the Database Schema: Define your tables. You will need at least:
+
+A Buoys table (ID, Name, Date Deployed).
+
+A Telemetry table (Buoy ID, Timestamp, Latitude, Longitude, Battery %, Wave Height).
+
+[ Y] Connect Backend to Database: Use SQLAlchemy to map your Python code to your SQL database, just like the reference project did.  
+
+Phase 2: Building the API Endpoints
+[ Y] Create a GET endpoint: Write a Python function for /api/buoys that fetches all current buoy locations from the database and sends them out as JSON.
+
+[ Y] Create a POST endpoint: Write a Python function for /api/buoys/add that allows the frontend to send new buoy data to be saved.
+
+[ Y] Create an Ingestion endpoint: Write an endpoint that your Iridium webhook can hit to automatically push new telemetry data into your database.
+
+Phase 3: Frontend Integration
+[ ] Remove Mock Data: In your current HTML file, replace your hardcoded JavaScript mock data with a fetch() call to your new /api/buoys endpoint.
+
+[ ] Update Leaflet: Write JavaScript to loop through the data returned by the API and place markers on the Leaflet map.
